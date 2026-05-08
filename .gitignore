@@ -1,0 +1,11 @@
+.env
+__pycache__/
+.venv/
+data/
+*.pyc
+*.ipynb
+*.csv
+*.svg
+*.txt
+!LICENSE.txt
+*.md

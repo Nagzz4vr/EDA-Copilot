@@ -83,9 +83,7 @@ class ConfidenceRouter:
             w_severity * severity_penalty +
             w_missing * missing_penalty
         )
-        confidence = 1.0 - risk
 
-        # Nonlinear suppression for high missing ratios
-        confidence *= (1 - missing_penalty) ** 2
+        confidence = 1.0 - risk
 
         return max(0.0, min(confidence, 1.0))
