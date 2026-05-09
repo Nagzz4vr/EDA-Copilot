@@ -19,11 +19,10 @@ class MetaAgent:
     def __init__(self, job_context, **kwargs):
         self.context = job_context
         self.state = State.PERCEIVING
-        self.prev_state: Optional[State] = None   # FIX 1: track previous state for _transition
+        self.prev_state: Optional[State] = None   
         self.max_iterations = 3
         self.iteration_count = 0
- 
-        # --- Dependency Injection ---
+
         self.ingestor = kwargs["ingestor"]
         self.canonicalizer = kwargs["canonicalizer"]
         self.cache_manager = kwargs["cache_manager"]

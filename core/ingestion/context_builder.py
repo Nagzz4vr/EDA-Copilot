@@ -166,7 +166,7 @@ class ContextBuilder:
                 
             return "numeric" 
 
-   
+
         if series.dtype == "object":
             cleaned = series.dropna().astype(str)
             if len(cleaned) == 0:

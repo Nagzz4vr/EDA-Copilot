@@ -101,7 +101,7 @@ class CanonicalData(BaseModel):
         # Sorts by 'type' then by 'name' to check against the input list
         sorted_v = sorted(v, key=lambda x: (x.type, x.name))
         if any(v[i].name != sorted_v[i].name for i in range(len(v))):
-             raise ValueError("Columns must be sorted by type, then by name")
+            raise ValueError("Columns must be sorted by type, then by name")
         return v
 
 

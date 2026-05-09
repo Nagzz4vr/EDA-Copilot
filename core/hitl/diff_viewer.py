@@ -15,8 +15,8 @@ class DataDiff:
 
     def render_sampple_table(self)->str:
         return (
-            f"=== BEFORE ===\n{self.sample_before}\n\n"
-            f"=== AFTER ===\n{self.sample_after}"
+            f"=== BEFORE ===\n{self.sample_bfr}\n\n"
+            f"=== AFTER ===\n{self.sample_aftr}"
         )
     
     def render_stats_delta(self)->str:
@@ -52,7 +52,7 @@ class DiffViewer:
 
         diff=DataDiff()
         diff.sample_bfr=sample.head(10)
-        diff.sample_aftr=sample.haed(10)
+        diff.sample_aftr=sample.head(10)
         diff.columns_changed = []
         common_cols = set(sample.columns).intersection(df_after.columns)
 

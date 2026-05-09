@@ -4,7 +4,7 @@ from dataclasses import dataclass,field
 @dataclass
 class ScoringWeights:
     """Configurable weights for different signal attributes"""
-    SEVERITY_WEIGHT =field(default_factory=lambda: {
+    SEVERITY_WEIGHT: Dict[str, float] = field(default_factory=lambda: {
     "critical": 1.00,   
     "high":     0.75,   
     "medium":   0.50,  
@@ -12,7 +12,7 @@ class ScoringWeights:
     "info":     0.10,   
                         })
     
-    IMPACT_MAP =  Dict[str, float] = field(default_factory=lambda: {
+    IMPACT_MAP:Dict[str, float] = field(default_factory=lambda: {
         "block_analysis":        1.00,
 
         "drop":                  0.90,  
@@ -102,16 +102,25 @@ class PriorityScoring:
 
     def rank_signals(self, signals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         scored = []
+    
         for signal in signals:
             score = self.score_signal(signal)
-            
-            scored.append({
+    
+            enriched = {
                 **signal,
-                "computed_priority": round(score, 2),
-                "original_priority": signal.get("priority", 0)
-            })
-        
-        return sorted(scored, key=lambda x: (-x["computed_priority"], -x["original_priority"]))
+                "computed_priority": float(score),
+                "original_priority": float(signal.get("priority", 0.0)),
+            }
+    
+            scored.append(enriched)
+    
+        return sorted(
+            scored,
+            key=lambda x: (
+                -x.get("computed_priority", 0.0),
+                -x.get("original_priority", 0.0),
+            ),
+        )
     
 
     #Base

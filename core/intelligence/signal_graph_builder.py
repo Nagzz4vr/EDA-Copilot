@@ -116,7 +116,7 @@ class SignalGraphBuilder:
                 if self._is_conflict(node_a, node_b):
                     self._add_edge(node_a.node_id, node_b.node_id, EdgeType.CONFLICTS_WITH, True, seen_edges)
                 
-         
+
                 self._check_prereq(node_a, node_b, seen_edges)
                 self._check_prereq(node_b, node_a, seen_edges)
 
@@ -160,8 +160,8 @@ class SignalGraphBuilder:
         if "IMPUTE" in a_type and "IMPUTE" in b_type:
             return True
 
-        if any(x in a_type for x in ["ENCODE", "HASH"]) and \
-           any(x in b_type for x in ["ENCODE", "HASH"]):
+        if  any(x in a_type for x in ["ENCODE", "HASH"]) and \
+            any(x in b_type for x in ["ENCODE", "HASH"]):
             return True
 
         return False

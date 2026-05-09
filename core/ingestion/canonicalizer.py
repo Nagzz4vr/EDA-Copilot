@@ -28,7 +28,7 @@ class Canonicalizer:
 
         elif pd.isna(data):
             return None
-         
+
         return data
 
 

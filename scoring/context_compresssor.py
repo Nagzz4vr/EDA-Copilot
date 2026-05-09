@@ -11,6 +11,11 @@ class ContextBlob:
     included: int
     dropped: int
     token_cost: int
+    def __len__(self):
+        return len(self.signals)
+    
+    def __getitem__(self, idx):
+        return self.signals[idx]
 
 
 class ContextCompressor:
@@ -24,7 +29,7 @@ class ContextCompressor:
         enc = tiktoken.encoding_for_model(model)
 
         for signal in ranked_signals:
-            serialized_dict = signal.to_compact_dict()
+            serialized_dict = signal
 
             serialized_str = json.dumps(serialized_dict, separators=(",", ":"))
 

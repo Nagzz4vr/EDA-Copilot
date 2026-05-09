@@ -16,10 +16,16 @@ class StateRegistry:
         fingerprint = query.get("fingerprint")
         results = []
         for filename in os.listdir(self.cache_dir):
-            with open(os.path.join(self.cache_dir, filename), 'r') as f:
-                entry = json.load(f)
-                if entry.get("fingerprint") == fingerprint:
-                    results.append(entry)
+            path = os.path.join(self.cache_dir, filename)
+        
+            if not filename.endswith(".json"):
+                continue
+            
+            with open(path, "r", encoding="utf-8") as f:
+                try:
+                    entry = json.load(f)
+                except Exception:
+                    continue
         
         if sort_by:
             results.sort(

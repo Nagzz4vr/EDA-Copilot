@@ -19,14 +19,12 @@ class TokenLedger:
         return hashlib.sha256(raw.encode()).hexdigest()
 
     def record(self, *, user_id, agent_id, model,
-               prompt_tokens, completion_tokens,
-               latency_ms=0, cache_hit=False,
-               retry_count=0, tool_calls=0):
+                prompt_tokens, completion_tokens,
+                latency_ms=0, cache_hit=False,
+                retry_count=0, tool_calls=0):
 
         total_tokens = prompt_tokens + completion_tokens
         cost = self._calculate_cost(model, prompt_tokens, completion_tokens)
-        if cost is None:
-            entry["cost_error"]=True
 
         entry = {
             "request_id": self.request_id,
@@ -46,6 +44,9 @@ class TokenLedger:
         }
 
         entry["event_id"] = self._make_event_id(entry)
+        if cost is None:
+            entry["cost_error"]=True
+
         line = json.dumps(entry, separators=(",", ":")) + "\n"
         fd = os.open(self.file_path, os.O_APPEND | os.O_CREAT | os.O_WRONLY)
         try:

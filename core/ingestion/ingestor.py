@@ -16,20 +16,20 @@ class SecurityError(Exception):
 
 
 class Ingestor:
-    # Class-level logger (shared by all instances)
+
     logger = logging.getLogger(__name__)
     
     def __init__(self, filepath: str, base_dir: str = None):
-        # Set base directory
+
         if base_dir is None:
             base_dir = os.getcwd()
         
         self.base_dir = Path(base_dir).resolve()
         
-        # Validate and set filepath
+
         self.filepath = self._validate_safe_path(filepath)
         
-        # Validate format and existence
+
         self._check_format()
         self._validate_exists()
     

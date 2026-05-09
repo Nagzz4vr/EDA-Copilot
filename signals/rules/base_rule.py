@@ -10,9 +10,9 @@ class RuleOutput:
     """Canonical signal output from any rule"""
     rule_name: str
     priority: int
-    type: Literal["feature_reduction", "feature_review", "data_quality", "model_risk"]
+    type: str
     action: str
-    severity: Literal["low", "medium", "high", "critical"]
+    severity: Literal["info","low","medium","high","critical"]
     message: str
     details: Dict[str, Any]
     timestamp: str = None

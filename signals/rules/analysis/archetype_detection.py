@@ -89,7 +89,7 @@ class SensorIoTRule(BaseRule):
         
         return num_numeric > 20 and has_date and high_missing
 
-    def run(self):
+    def run(self, context):
         return RuleOutput(
             rule_name=self.name,
             priority=self.priority,
@@ -118,7 +118,7 @@ class NLPDatasetRule(BaseRule):
         
         return text_count > other_count and global_avg > 50
 
-    def run(self):
+    def run(self, context):
         return RuleOutput(
             rule_name=self.name,
             priority=self.priority,

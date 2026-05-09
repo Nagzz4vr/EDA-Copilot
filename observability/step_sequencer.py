@@ -20,20 +20,52 @@ class StepSequencer:
         self.timeline: Dict[str, List[StepEvent]] = {}
         self._lock = Lock()
 
-    def record(self, state_uuid: str, step_name: str, metadata: dict = None):
-        data = StepEvent(
+    def record(self, *args, metadata: dict = None):
+        """
+        Supports:
+        1. record(state_uuid, step_name)
+        2. record(from, to, trigger, job_id)
+        3. record(dict_event)
+        """
+    
+        # -------------------------
+        # CASE 1: dict event
+        # -------------------------
+        if len(args) == 1 and isinstance(args[0], dict):
+            event = args[0]
+    
+            state_uuid = event.get("job_id") or event.get("state_uuid", "unknown")
+    
+            step_name = f"{event.get('from_state')}->{event.get('to_state')}:{event.get('trigger')}"
+    
+        # -------------------------
+        # CASE 2: transition tuple
+        # -------------------------
+        elif len(args) == 4:
+            from_state, to_state, trigger, state_uuid = args
+            step_name = f"{from_state}->{to_state}:{trigger}"
+    
+        # -------------------------
+        # CASE 3: simple call
+        # -------------------------
+        elif len(args) == 2:
+            state_uuid, step_name = args
+    
+        else:
+            raise ValueError(f"Invalid StepSequencer.record args: {args}")
+    
+        event_obj = StepEvent(
             step=step_name,
             timestamp=datetime.utcnow(),
             metadata=metadata or {}
         )
-
+    
         with self._lock:
-            if state_uuid not in self.timeline:
-                self.timeline[state_uuid] = []
-            self.timeline[state_uuid].append(data)
-
+            self.timeline.setdefault(state_uuid, []).append(event_obj)
+    
         try:
-            TraceLogger.log(
+            # FIX: proper logger usage (not static)
+            TraceLogger(session_id=state_uuid).log(
                 tool="STEP_SEQUENCER",
                 intent=f"Recorded step {step_name}",
                 inputs={"state_uuid": state_uuid},
@@ -41,7 +73,7 @@ class StepSequencer:
                 confidence=1.0
             )
         except Exception:
-            pass  
+            pass
 
     def get_timeline(self, state_uuid: str) -> List[StepEvent]:
         return self.timeline.get(state_uuid, [])
