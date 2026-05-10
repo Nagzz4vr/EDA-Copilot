@@ -1,0 +1,384 @@
+{
+    "schema_version": "1.0.0",
+    "job_id": "test_job",
+    "generated_at": "2026-05-10T12:25:38.687209+00:00",
+    "execution_metrics": {
+        "rows_processed": 891,
+        "actions_applied": [
+            {
+                "node_id": "IMPUTE_MEAN_Cabin_Cabin",
+                "operation": "impute",
+                "column": "Cabin",
+                "status": "SUCCESS"
+            },
+            {
+                "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_Embarked",
+                "operation": "encode",
+                "column": "Embarked",
+                "status": "SUCCESS"
+            },
+            {
+                "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_Parch",
+                "operation": "encode",
+                "column": "Parch",
+                "status": "SUCCESS"
+            },
+            {
+                "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_Pclass",
+                "operation": "encode",
+                "column": "Pclass",
+                "status": "SUCCESS"
+            },
+            {
+                "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_SibSp",
+                "operation": "encode",
+                "column": "SibSp",
+                "status": "SUCCESS"
+            }
+        ],
+        "columns_added": [],
+        "columns_dropped": [],
+        "columns_modified": [],
+        "execution_duration_s": 0,
+        "errors": []
+    },
+    "decision_plan": {
+        "version": 1,
+        "actions": [
+            {
+                "id": "IMPUTE_MEAN_Cabin",
+                "action_type": "IMPUTE_MEAN",
+                "target_columns": [
+                    "Cabin"
+                ],
+                "parameters": {
+                    "benefit_score": 0.9,
+                    "cost_score": 0.1,
+                    "risk_level": "LOW",
+                    "originating_rule": "R1.5_high_missing"
+                },
+                "metadata": {}
+            },
+            {
+                "id": "LABEL_ENCODE_Sex_Survived",
+                "action_type": "LABEL_ENCODE",
+                "target_columns": [
+                    "Sex",
+                    "Survived"
+                ],
+                "parameters": {
+                    "benefit_score": 0.1728,
+                    "cost_score": 0.2,
+                    "risk_level": "LOW",
+                    "originating_rule": "R3.3_Binary_Categorical"
+                },
+                "metadata": {}
+            },
+            {
+                "id": "SKIP_DEDUPLICATION_dataset",
+                "action_type": "SKIP_DEDUPLICATION",
+                "target_columns": [
+                    "dataset"
+                ],
+                "parameters": {
+                    "benefit_score": 0.10200000000000004,
+                    "cost_score": 0.2,
+                    "risk_level": "LOW",
+                    "originating_rule": "R1.3_no_duplicates"
+                },
+                "metadata": {}
+            },
+            {
+                "id": "GENERATE_PLOTS_dataset",
+                "action_type": "GENERATE_PLOTS",
+                "target_columns": [
+                    "dataset"
+                ],
+                "parameters": {
+                    "benefit_score": 0.95,
+                    "cost_score": 0.2,
+                    "risk_level": "LOW",
+                    "originating_rule": "R5.3_categorical_bar_chart|R5.1_numeric_distribution_plot|R5.4_high_cardinality_bar_chart|R5.2_skewed_numeric_log_plot|R5.5_correlation_heatmap_trigger"
+                },
+                "metadata": {}
+            },
+            {
+                "id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp",
+                "action_type": "ONE_HOT_ENCODE",
+                "target_columns": [
+                    "Embarked",
+                    "Parch",
+                    "Pclass",
+                    "SibSp"
+                ],
+                "parameters": {
+                    "benefit_score": 0.1888,
+                    "cost_score": 0.4,
+                    "risk_level": "LOW",
+                    "originating_rule": "R3.4_Low_Card_One_Hot"
+                },
+                "metadata": {}
+            },
+            {
+                "id": "EXCLUDE_FROM_MODELING_Name",
+                "action_type": "EXCLUDE_FROM_MODELING",
+                "target_columns": [
+                    "Name"
+                ],
+                "parameters": {
+                    "benefit_score": 0.5920000000000001,
+                    "cost_score": 0.2,
+                    "risk_level": "LOW",
+                    "originating_rule": "R2.1_Definite_ID_Column"
+                },
+                "metadata": {}
+            },
+            {
+                "id": "RECLASSIFY_AS_ID_PassengerId",
+                "action_type": "RECLASSIFY_AS_ID",
+                "target_columns": [
+                    "PassengerId"
+                ],
+                "parameters": {
+                    "benefit_score": 0.7490000000000001,
+                    "cost_score": 0.2,
+                    "risk_level": "MEDIUM",
+                    "originating_rule": "R2.5_Numeric_ID_Masquerade"
+                },
+                "metadata": {}
+            }
+        ],
+        "metadata": {
+            "total_benefit": 3.6546000000000003,
+            "total_cost": 1.4999999999999998,
+            "max_risk": "MEDIUM",
+            "estimated_memory_delta_mb": 0.0
+        },
+        "speculative_candidates": [
+            {
+                "id": "IMPUTE_KNN_Cabin",
+                "action_type": "IMPUTE_KNN",
+                "target_columns": [
+                    "Cabin"
+                ],
+                "benefit_score": 1.08,
+                "cost_score": 0.6,
+                "risk_level": "MEDIUM",
+                "originating_rule": "R1.5_high_missing"
+            }
+        ]
+    },
+    "signal_summary": {
+        "total": 11,
+        "shown": 10,
+        "top_k_signals": [
+            {
+                "rule_name": "R1.5_high_missing",
+                "priority": 100,
+                "type": "column_health",
+                "action": "warning",
+                "severity": "high",
+                "message": "High missing values (>50%) detected in: Cabin",
+                "details": {
+                    "affected_columns": [
+                        "Cabin"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.963525",
+                "computed_priority": 90.0,
+                "original_priority": 100.0
+            },
+            {
+                "rule_name": "R2.5_Numeric_ID_Masquerade",
+                "priority": 85,
+                "type": "type_reclassification",
+                "action": "reclassify_as_id",
+                "severity": "medium",
+                "message": "Numeric columns PassengerId have very high uniqueness. Re-classify as Categorical IDs to prevent the model from treating them as continuous scales.",
+                "details": {
+                    "affected_columns": [
+                        "PassengerId"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.963525",
+                "computed_priority": 74.9,
+                "original_priority": 85.0
+            },
+            {
+                "rule_name": "R2.1_Definite_ID_Column",
+                "priority": 100,
+                "type": "schema_detection",
+                "action": "exclude_from_modeling",
+                "severity": "info",
+                "message": "Identifiers detected: Name. These should be excluded from machine learning models to prevent leakage.",
+                "details": {
+                    "affected_columns": [
+                        "Name"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.963525",
+                "computed_priority": 59.2,
+                "original_priority": 100.0
+            },
+            {
+                "rule_name": "R5.3_categorical_bar_chart",
+                "priority": 20,
+                "type": "visualization",
+                "action": "generate_plots",
+                "severity": "info",
+                "message": "Generating full bar charts for categories: Embarked, Parch, Pclass, Sex, SibSp, Survived",
+                "details": {
+                    "columns": [
+                        "Embarked",
+                        "Parch",
+                        "Pclass",
+                        "Sex",
+                        "SibSp",
+                        "Survived"
+                    ],
+                    "mode": "full",
+                    "plot_types": [
+                        "bar_chart"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.963525",
+                "computed_priority": 19.0,
+                "original_priority": 20.0
+            },
+            {
+                "rule_name": "R5.1_numeric_distribution_plot",
+                "priority": 20,
+                "type": "visualization",
+                "action": "generate_plots",
+                "severity": "info",
+                "message": "Generating distribution plots (histogram + boxplot) for: Age, Fare, PassengerId",
+                "details": {
+                    "columns": [
+                        "Age",
+                        "Fare",
+                        "PassengerId"
+                    ],
+                    "plot_types": [
+                        "histogram",
+                        "boxplot"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.963525",
+                "computed_priority": 19.0,
+                "original_priority": 20.0
+            },
+            {
+                "rule_name": "R5.4_high_cardinality_bar_chart",
+                "priority": 15,
+                "type": "visualization",
+                "action": "generate_plots",
+                "severity": "info",
+                "message": "High cardinality detected in Cabin, Ticket. Plotting Top 10 categories and grouping the remainder into 'Other'.",
+                "details": {
+                    "columns": [
+                        "Cabin",
+                        "Ticket"
+                    ],
+                    "mode": "top_10_grouped",
+                    "grouping_label": "Other",
+                    "plot_types": [
+                        "bar_chart"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.965042",
+                "computed_priority": 19.0,
+                "original_priority": 15.0
+            },
+            {
+                "rule_name": "R5.2_skewed_numeric_log_plot",
+                "priority": 15,
+                "type": "visualization",
+                "action": "generate_plots",
+                "severity": "info",
+                "message": "Highly skewed data detected. Adding log-scale histograms for: Fare to better visualize the long tail.",
+                "details": {
+                    "columns": [
+                        "Fare"
+                    ],
+                    "plot_types": [
+                        "log_histogram"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.965042",
+                "computed_priority": 19.0,
+                "original_priority": 15.0
+            },
+            {
+                "rule_name": "R5.5_correlation_heatmap_trigger",
+                "priority": 10,
+                "type": "visualization",
+                "action": "generate_plots",
+                "severity": "info",
+                "message": "Dataset contains 3 numeric features. Generating a global correlation heatmap to identify multicollinearity clusters.",
+                "details": {
+                    "columns": [
+                        "Age",
+                        "Fare",
+                        "PassengerId"
+                    ],
+                    "plot_types": [
+                        "correlation_heatmap"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.965042",
+                "computed_priority": 19.0,
+                "original_priority": 10.0
+            },
+            {
+                "rule_name": "R3.4_Low_Card_One_Hot",
+                "priority": 55,
+                "type": "encoding_strategy",
+                "action": "one_hot_encode",
+                "severity": "info",
+                "message": "Low-cardinality categories (3-10) found in: Embarked, Parch, Pclass, SibSp. One-Hot Encoding is recommended for these features.",
+                "details": {
+                    "affected_columns": [
+                        "Embarked",
+                        "Parch",
+                        "Pclass",
+                        "SibSp"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.963525",
+                "computed_priority": 18.88,
+                "original_priority": 55.0
+            },
+            {
+                "rule_name": "R3.3_Binary_Categorical",
+                "priority": 60,
+                "type": "encoding_strategy",
+                "action": "label_encode",
+                "severity": "info",
+                "message": "Binary categories detected in: Sex, Survived. Label encoding (0/1) is recommended to keep the feature space small.",
+                "details": {
+                    "affected_columns": [
+                        "Sex",
+                        "Survived"
+                    ]
+                },
+                "timestamp": "2026-05-10T12:25:37.963525",
+                "computed_priority": 17.28,
+                "original_priority": 60.0
+            }
+        ]
+    },
+    "confidence_summary": {
+        "final_score": 0.0,
+        "label": "LOW"
+    },
+    "validation_summary": {
+        "passed": false,
+        "violations": [
+            {
+                "severity": "HIGH",
+                "message": "Model performance degraded by -0.0300"
+            }
+        ]
+    },
+    "confidence_timeline": []
+}

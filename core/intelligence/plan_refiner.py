@@ -25,7 +25,13 @@ class PlanRefiner:
         self.dataset_sample = dataset_sample
         self.removed_actions: List[Dict] = []
 
-    def refine(self) -> Dict[str, Any]:           
+    def refine(self) -> Dict[str, Any]:
+        # 1. Normalize actions at entry to prevent schema drift
+        self.plan["actions"] = [
+            self._normalize_action(a)
+            for a in self.plan.get("actions", [])
+        ]
+
         self._apply_constraint_violation_fixes()
         self._apply_dimensionality_explosion_prevention()
         self._apply_memory_optimization()
@@ -35,13 +41,35 @@ class PlanRefiner:
         if self._has_changes():
             self.plan["version"] = self.original_plan.get("version", 1) + 1
 
+        # 2. Sanitize output: Strip keys like `fit_on` that aren't in the strict Pydantic model
+        for action in self.plan.get("actions", []):
+            action.pop("fit_on", None)
+
         return self.plan
 
+    # --- Schema Normalization & Safe Access Helpers ---
 
+    def _normalize_action(self, a: Dict) -> Dict:
+        return {
+        "id":             a.get("id", ""),
+        "action_type":    a.get("action_type"),
+        "target_columns": a.get("target_columns", []),
+        "parameters":     a.get("parameters", {}),
+        "metadata":       a.get("metadata", {}),
+        "fit_on":         a.get("fit_on", "train_only"),
+    }
+
+    def _edge_source(self, e: Dict) -> str:
+        return e.get("source_id") or e.get("source")
+
+    def _edge_target(self, e: Dict) -> str:
+        return e.get("target_id") or e.get("target")
+
+    # --- Refinement Logic ---
 
     def _apply_constraint_violation_fixes(self):
         for violation in self.impact_report.get("violations", []):
-            offenders = self._find_offending_actions(violation) 
+            offenders = self._find_offending_actions(violation)
 
             if not offenders:
                 continue
@@ -52,50 +80,46 @@ class PlanRefiner:
                 replacements = self._find_replacements(off)
 
                 if replacements:
-                    self.plan["actions"].append(         
-                        {                                 
-                            "action_type": replacements[0]["action_type"],
-                            "target_columns": replacements[0]["target_columns"],
+                    self.plan["actions"].append(
+                        {
+                            "action_type": replacements[0].get("action_type"),
+                            "target_columns": replacements[0].get("target_columns", []),
                         }
                     )
 
     def _find_offending_actions(self, violation: Dict) -> List[Dict]:
-       
         offenders = []
 
-        if violation["type"] == "ACTION_ORDERING_CONFLICT":
-            col = violation["column"]
-            ops = violation["sequence"]
+        if violation.get("type") == "ACTION_ORDERING_CONFLICT":
+            col = violation.get("column")
+            ops = violation.get("sequence", [])
 
             for action in self.plan["actions"]:
-                if col in action["target_columns"] and action["action_type"] in ops:
+                if col in action.get("target_columns", []) and action.get("action_type") in ops:
                     offenders.append(action)
 
         return offenders
 
     def _remove_actions(self, offenders: List[Dict]) -> List[Dict]:
-
         offenders_id = {
-            (a["action_type"], tuple(a["target_columns"]))
+            (a.get("action_type"), tuple(a.get("target_columns", [])))
             for a in offenders
         }
 
         return [
             a for a in self.plan["actions"]
-            if (a["action_type"], tuple(a["target_columns"])) not in offenders_id
+            if (a.get("action_type"), tuple(a.get("target_columns", []))) not in offenders_id
         ]
-
-
 
     def _apply_dimensionality_explosion_prevention(self):
         projections = self.impact_report.get("projections", {})
         current_cols = projections.get("final_column_count", 0)
 
-        if current_cols <= self.max_cols:        
+        if current_cols <= self.max_cols:
             return
 
         one_hot_actions = [
-            a for a in self.plan["actions"]       
+            a for a in self.plan["actions"]
             if a.get("action_type") == "ONE_HOT_ENCODE"
         ]
         if not one_hot_actions:
@@ -114,7 +138,7 @@ class PlanRefiner:
         def est_expansion(a: Dict) -> int:
             total = 0
             for c in a.get("target_columns", []):
-                if c in self.dataset_sample:     
+                if self.dataset_sample is not None and c in self.dataset_sample.columns:
                     k = self.dataset_sample[c].nunique(dropna=True)
                     total += max(0, k - 1)
             return total
@@ -139,10 +163,9 @@ class PlanRefiner:
 
             new_width = self._replacement_width(replacement)
             current_cols = current_cols - expansion + new_width
-            self.removed_actions.append(action)   
+            self.removed_actions.append(action)
 
         self.plan["actions"] = self._topological_sort(self.plan["actions"])
-
 
     def _apply_memory_optimization(self):
         actual_mb = self.impact_report.get("projections", {}).get(
@@ -179,20 +202,17 @@ class PlanRefiner:
         first_scale_idx = len(self.plan["actions"])
 
         for i, action in enumerate(self.plan["actions"]):
-            if "IMPUTE" in action["action_type"]:
+            if "IMPUTE" in action.get("action_type", ""):
                 last_impute_idx = i
-            if "SCALE" in action["action_type"] and i < first_scale_idx:
+            if "SCALE" in action.get("action_type", "") and i < first_scale_idx:
                 first_scale_idx = i
 
         insert_at = max(last_impute_idx + 1, 0)
         insert_at = min(insert_at, first_scale_idx)
         self.plan["actions"].insert(insert_at, downcast_action)
 
-
-
     def _apply_leakage_prevention(self):
         HIGH_LEVELS = {"CRITICAL", "HIGH"}
-
 
         leaky_cols = {
             r["column"]
@@ -207,7 +227,7 @@ class PlanRefiner:
             ]
 
         leaky_action_keys = {
-            (r["action"], r["column"])
+            (r.get("action"), r.get("column"))
             for r in self.impact_report.get("action_risks", [])
             if r.get("type") == "TRAIN_TEST_LEAKAGE"
         }
@@ -215,14 +235,12 @@ class PlanRefiner:
         for action in self.plan["actions"]:
             for act_type, col in leaky_action_keys:
                 if (
-                    action["action_type"] == act_type
+                    action.get("action_type") == act_type
                     and col in action.get("target_columns", [])
                 ):
                     action["fit_on"] = "train_only"
 
-
     def _apply_pipeline_consolidation(self):
-
         has_violations = bool(self.impact_report.get("violations"))
         has_high_leakage = any(
             r.get("level") in {"CRITICAL", "HIGH"}
@@ -232,7 +250,7 @@ class PlanRefiner:
             return
 
         connected_pairs = {
-            (e["source_id"], e["target_id"])
+            (self._edge_source(e), self._edge_target(e))
             for e in self.signal_graph.get("edges", [])
         }
 
@@ -245,17 +263,15 @@ class PlanRefiner:
                 and not set(a.get("target_columns", [])) & set(b.get("target_columns", []))
             )
 
-
         by_type: Dict[str, List[Dict]] = collections.defaultdict(list)
         for action in self.plan["actions"]:
-            by_type[action["action_type"]].append(action)
+            by_type[action.get("action_type", "UNKNOWN")].append(action)
 
         merged: List[Dict] = []
         for act_type, group in by_type.items():
             if len(group) == 1:
                 merged.append(group[0])
                 continue
-
 
             can_merge = all(
                 are_independent(group[i], group[j])
@@ -278,48 +294,52 @@ class PlanRefiner:
             else:
                 merged.extend(group)
 
-
         self.plan["actions"] = self._topological_sort(merged)
 
     def _find_replacements(self, removed_action: Dict) -> List[Dict]:
         candidates = []
-        for node in self.signal_graph["nodes"]:
-            if tuple(node["target_columns"]) != tuple(removed_action["target_columns"]):
+        for node in self.signal_graph.get("nodes", []):
+            if tuple(node.get("target_columns", [])) != tuple(removed_action.get("target_columns", [])):
                 continue
-            if node["action_type"] == removed_action["action_type"]:
+            if node.get("action_type") == removed_action.get("action_type"):
                 continue
             if not self._is_compatible(node):
                 continue
             candidates.append(node)
 
         candidates.sort(
-            key=lambda n: n["benefit_score"] - n["cost_score"],
+            key=lambda n: n.get("benefit_score", 0) - n.get("cost_score", 0),
             reverse=True,
         )
         return candidates[:1]
 
     def _is_compatible(self, node: Dict) -> bool:
         selected_ids = {
-            f"{a['action_type']}_{'_'.join(a['target_columns'])}"
+            f"{a.get('action_type')}_{'_'.join(a.get('target_columns', []))}"
             for a in self.plan["actions"]
         }
 
-        for e in self.signal_graph["edges"]:
-            if e["edge_type"] != "CONFLICTS_WITH":
+        node_id = node.get("node_id")
+
+        for e in self.signal_graph.get("edges", []):
+            if e.get("edge_type") != "CONFLICTS_WITH":
                 continue
-            if e["source_id"] == node["node_id"] and e["target_id"] in selected_ids:
+
+            src = self._edge_source(e)
+            tgt = self._edge_target(e)
+
+            if src == node_id and tgt in selected_ids:
                 return False
-            if e["target_id"] == node["node_id"] and e["source_id"] in selected_ids:
+            if tgt == node_id and src in selected_ids:
                 return False
 
         return True
 
     def _has_changes(self) -> bool:
         def normalise(actions: List[Dict]) -> List[tuple]:
-
             result = []
             for a in actions:
-                key = (a["action_type"], tuple(sorted(a.get("target_columns", []))))
+                key = (a.get("action_type"), tuple(sorted(a.get("target_columns", []))))
                 result.append(key)
             return sorted(result)
 
@@ -328,10 +348,9 @@ class PlanRefiner:
         )
 
     def _action_key(self, action: Dict) -> str:
-        return f"{action['action_type']}_{'_'.join(action.get('target_columns', []))}"
+        return f"{action.get('action_type')}_{'_'.join(action.get('target_columns', []))}"
 
     def _choose_replacement(self, action: Dict, expansion: int) -> Dict:
-
         if self.label_column:
             replacement_type = "TARGET_ENCODE"
         else:
@@ -339,7 +358,7 @@ class PlanRefiner:
 
         return {
             "action_type": replacement_type,
-            "target_columns": action["target_columns"],
+            "target_columns": action.get("target_columns", []),
             "fit_on": action.get("fit_on", "train_only"),
             **({"n_components": 16} if replacement_type == "FEATURE_HASH" else {}),
         }
@@ -352,10 +371,10 @@ class PlanRefiner:
         raise ValueError(f"Action not found in plan: {self._action_key(old)}")
 
     def _replacement_width(self, action: Dict) -> int:
-
-        if action["action_type"] == "TARGET_ENCODE":
+        act_type = action.get("action_type")
+        if act_type == "TARGET_ENCODE":
             return len(action.get("target_columns", []))
-        if action["action_type"] == "FEATURE_HASH":
+        if act_type == "FEATURE_HASH":
             return action.get("n_components", 16)
 
         return len(action.get("target_columns", []))
@@ -368,9 +387,12 @@ class PlanRefiner:
         adj: Dict[str, List[str]] = collections.defaultdict(list)
 
         for edge in self.signal_graph.get("edges", []):
-            if edge["edge_type"] != "PREREQUISITE_FOR":
+            if edge.get("edge_type") != "PREREQUISITE_FOR":
                 continue
-            src, tgt = edge["source_id"], edge["target_id"]
+            
+            src = self._edge_source(edge)
+            tgt = self._edge_target(edge)
+            
             if src in action_keys and tgt in action_keys:
                 adj[src].append(tgt)
                 in_degree[tgt] += 1

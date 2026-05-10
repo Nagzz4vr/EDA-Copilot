@@ -6,7 +6,11 @@ from core.execution.dag_builder import DAGNode
 
 
 class DAGExecutionError(Exception):
-    pass
+    def __init__(self, node_id, operation, original_error):
+        super().__init__(
+            f"DAG execution failed at node={node_id}, "
+            f"operation={operation}, error={original_error}"
+        )
 
 class UnsupportedOperationError(Exception):
     pass
@@ -57,17 +61,17 @@ class DAGExecutor:
                 self._rollback(node.id)
                 raise DAGExecutionError(node.id, node.operation, e)
 
-        self.state_manager.save(state_uuid, dag, result={
-            "rows_processed"  : len(self.df),
-            "actions_applied" : actions_applied,
-        })
-
         return {
-            "df_transformed"  : self.df,
-            "rows_processed"  : len(self.df),
-            "actions_applied" : actions_applied,
-            "dag_version"     : dag.version,
-        }
+                "dataframe": self.df,
+                "rows_processed": len(self.df),
+                "actions_applied": actions_applied,
+                "dag_version": dag.version,
+                "columns_added": [],
+                "columns_dropped": [],
+                "columns_modified": [],
+                "duration_seconds": 0,
+                "errors": [],
+                }
     async def _execute_node(self,node: DAGNode, mode: str) -> DataFrame:
         target_df = self._get_target_df(self.df, mode)
 
@@ -91,21 +95,62 @@ class DAGExecutor:
             case _:
                 raise UnsupportedOperationError(node.operation)
             
-    def _apply_impute(self,df, node) -> DataFrame:
-        strategy = node.params["strategy"]   # "mean" | "median" | "mode" | "constant"
-        value    = node.params.get("fill_value")
+    def _apply_impute(self, df, node) -> DataFrame:
+        strategy = node.params["strategy"]
+        value = node.params.get("fill_value")
+
+        col = node.column
+
+        if col not in df.columns:
+            return df
+
+        series = df[col]
+
+
         if strategy == "mean":
-            df[node.column] = df[node.column].fillna(df[node.column].mean())
+            if not pd.api.types.is_numeric_dtype(series):
+                # fallback instead of crash
+                df[col] = series.fillna(series.mode().iloc[0] if not series.mode().empty else "UNKNOWN")
+                return df
+
+            df[col] = series.fillna(series.mean())
+            return df
+
+
         elif strategy == "median":
-            df[node.column] = df[node.column].fillna(df[node.column].median())
+            if not pd.api.types.is_numeric_dtype(series):
+                df[col] = series.fillna(series.mode().iloc[0] if not series.mode().empty else "UNKNOWN")
+                return df
+
+            df[col] = series.fillna(series.median())
+            return df
+
         elif strategy == "mode":
-            df[node.column] = df[node.column].fillna(df[node.column].mode()[0])
+            mode_val = series.mode(dropna=True)
+            fill = mode_val.iloc[0] if len(mode_val) > 0 else "UNKNOWN"
+            df[col] = series.fillna(fill)
+            return df
+
+
         elif strategy == "constant":
-            df[node.column] = df[node.column].fillna(value)
+            df[col] = series.fillna(value)
+            return df
+
+        elif strategy == "knn":
+            from sklearn.impute import KNNImputer
+
+            numeric_cols = df.select_dtypes(include="number").columns.tolist()
+
+            if len(numeric_cols) == 0:
+                return df
+
+            imputer = KNNImputer(n_neighbors=5)
+            df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
+            return df
+
         else:
             raise InvalidStrategyError(strategy)
-        return df
-    
+
     def _apply_encode(self,df, node) -> DataFrame:
         method = node.params["method"]  
         if method == "ordinal":
@@ -193,7 +238,7 @@ class DAGExecutor:
     #         output_path = output_path
     #     )
 
-    def _get_target_df(df, mode) -> DataFrame:
+    def _get_target_df(self,df, mode) -> DataFrame:
         if mode == "DRY_RUN":
             return df.copy()       
         elif mode == "SAMPLE":

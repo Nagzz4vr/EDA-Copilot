@@ -1,115 +1,101 @@
 import pkgutil
 import importlib
 import inspect
-from typing import List, Type,Dict,Any
+from typing import List, Dict, Any
 from signals.rules.base_rule import BaseRule, RuleOutput
 import traceback
 
-class RuleEngine:
-    def __init__(self,context:dict,logger=None):
-        self.context=context
-        self.rules= self._discover_rules() 
-        self.logger=logger
 
-    def _discover_rules(self)->list[BaseRule]:
-        rules=[]
+class RuleEngine:
+    def __init__(self, context: dict, logger=None):
+        self.context = context
+        self.logger = logger
+        self.rules = self._discover_rules()
+
+    def _discover_rules(self) -> list[BaseRule]:
+        seen_classes = set()
+        rules = []
+
         package = importlib.import_module("signals.rules")
 
         for _, module_name, _ in pkgutil.walk_packages(
             package.__path__, package.__name__ + "."
         ):
-            module = importlib.import_module(module_name)
+            try:
+                module = importlib.import_module(module_name)
+            except Exception as e:
+                print(f"[RuleEngine] Failed to import module {module_name}: {e}")
+                continue
 
             for _, obj in inspect.getmembers(module, inspect.isclass):
-                if issubclass(obj, BaseRule) and obj is not BaseRule:
+                if (
+                    issubclass(obj, BaseRule)
+                    and obj is not BaseRule
+                    and obj not in seen_classes
+                ):
+                    seen_classes.add(obj)
                     rules.append(obj())
-        rules.sort(key=lambda rule: getattr(rule, "priority", 0), reverse=True)
 
+        rules.sort(key=lambda rule: getattr(rule, "priority", 0), reverse=True)
+        print(f"[RuleEngine] Discovered {len(rules)} unique rules.")
         return rules
 
-    # def _discover_rules(self) -> list[BaseRule]:
-    #     rules = []
+    def _log_error(self, rule_name: str, stage: str, e: Exception):
+        tb = traceback.format_exc()
 
-    #     package = importlib.import_module("signals.rules")
-
-    #     print("PACKAGE:", package)
-    #     print("PATH:", package.__path__)
-
-    #     for _, module_name, _ in pkgutil.walk_packages(
-    #         package.__path__,
-    #         package.__name__ + "."
-    #     ):
-
-    #         print(f"\nIMPORTING MODULE: {module_name}")
-
-    #         try:
-    #             module = importlib.import_module(module_name)
-
-    #             print("SUCCESS")
-
-    #             for name, obj in inspect.getmembers(module, inspect.isclass):
-
-    #                 print("FOUND CLASS:", name)
-
-    #                 try:
-    #                     print("ISSUBCLASS:", issubclass(obj, BaseRule))
-    #                 except Exception as e:
-    #                     print("ISSUBCLASS ERROR:", e)
-
-    #                 if issubclass(obj, BaseRule) and obj is not BaseRule:
-    #                     print("ADDING RULE:", name)
-    #                     rules.append(obj())
-
-    #         except Exception as e:
-    #             print("MODULE IMPORT FAILED:", module_name)
-    #             traceback.print_exc()
-
-    #     rules.sort(
-    #         key=lambda rule: getattr(rule, "priority", 0),
-    #         reverse=True
-    #     )
-
-    #     print("\nFINAL RULE COUNT:", len(rules))
-
-    #     return rules
-
-    def run(self) -> List[Dict[str, Any]]:
-        signal_set = []
-        
-        for rule in self.rules:
+        if self.logger is not None:
             try:
-                if rule.applies(self.context):
-                    result = rule.run(self.context)
-                    
-                    if not isinstance(result, RuleOutput):
-                        raise TypeError(
-                            f"Rule {rule.name} must return RuleOutput, got {type(result)}"
-                        )
-                    
-                    signal_set.append(result.to_dict())
-                    
-            except Exception as e:
                 self.logger.log(
                     tool="RULE_ENGINE",
-                    intent="Rule execution failed",
+                    intent=f"Rule {stage} failed",
                     inputs={
-                        "rule": rule.name,
-                        "rule_class": rule.__class__.__name__,
+                        "rule": rule_name,
+                        "stage": stage,
                     },
                     outputs={
                         "error_type": type(e).__name__,
                         "error": str(e),
-                        "traceback": traceback.format_exc(),
+                        "traceback": tb,
                     },
                     confidence=0.0,
                 )
+            except Exception as log_err:
+                print(f"[RuleEngine] Logger itself failed: {log_err}")
 
-                print("\n" + "=" * 80)
-                print(f"RULE FAILURE: {rule.name}")
-                print("=" * 80)
-                print(traceback.format_exc())
+        print("\n" + "=" * 80)
+        print(f"RULE FAILURE [{stage.upper()}]: {rule_name}")
+        print("=" * 80)
+        print(tb)
 
+    def run(self) -> List[Dict[str, Any]]:
+        signal_set = []
+
+        for rule in self.rules:
+
+            # ── Gate 1: applies() ─────────────────────────────────────────
+            try:
+                should_run = rule.applies(self.context)
+            except Exception as e:
+                self._log_error(rule.name, "applies", e)
+                continue
+
+            if not should_run:
+                continue
+
+            # ── Gate 2: run() ─────────────────────────────────────────────
+            try:
+                result = rule.run(self.context)
+
+                if not isinstance(result, RuleOutput):
+                    raise TypeError(
+                        f"Rule {rule.name} must return RuleOutput, got {type(result)}"
+                    )
+
+                signal_set.append(result.to_dict())
+
+            except Exception as e:
+                self._log_error(rule.name, "run", e)
+                continue
+
+        print(f"[RuleEngine] {len(signal_set)} signals emitted.")
         return signal_set
-    
-if __name__ == "__main__":
-    re=RuleEngine()

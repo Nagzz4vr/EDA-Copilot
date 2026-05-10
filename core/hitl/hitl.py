@@ -44,7 +44,7 @@ class RiskEngine:
 
         metadata = metadata or {}
 
-        transforms = plan.get("transforms", [])
+        transforms = plan.get("transforms") or plan.get("actions") or []
 
         reasons = []
         risk_level = "LOW"
@@ -82,7 +82,7 @@ class HITL:
     def __init__(self, logger):
         self.logger = logger
 
-    async def request_approval(self,plan: Dict[str, Any],risk_result: Dict[str, Any],state_uuid: str) -> str:
+    async def request_approval(self,plan: Dict[str, Any],risk_result: Dict[str, Any],state_uuid: str) -> Dict[str, Any]:
         self.logger.log(
             tool="HITL",
             intent="Human approval requested",
@@ -105,7 +105,11 @@ class HITL:
             outputs={"action": action},
             confidence=1.0
         )
-        return action
+        return {
+            "action": "APPROVE" | "REJECT",
+            "state_uuid": state_uuid,
+            "risk_level": risk_result["risk_level"]
+                }
 
     def _display_review(
         self,
@@ -124,6 +128,16 @@ class HITL:
 
         print("\nReasons:")
 
+        self.logger.log(
+    tool="HITL_UI",
+    intent="Displaying human review payload",
+    inputs={
+        "plan": plan,
+        "risk_result": risk_result
+    },
+    outputs={},
+    confidence=0.8
+)
         for reason in risk_result["reasons"]:
             print(f" - {reason}")
 

@@ -7,24 +7,44 @@ class CacheManager:
 
     def lookup(self, package: dict):
         metadata = package.get("metadata", {})
+    
         uuid = metadata.get("state_uuid")
         fingerprint = metadata.get("fingerprint")
-
-        exact_entry = self.storage.find_one({"state_uuid": uuid})
-
+    
+        # --------------------------------------------------
+        # EXACT HIT
+        # --------------------------------------------------
+    
+        exact_entry = self.storage.find_one({
+            "state_uuid": uuid
+        })
+    
         if exact_entry:
-            return "EXACT_HIT", exact_entry.get("dag")
-
-     
+            dag = exact_entry.get("dag")
+    
+            if dag is not None:
+                return "EXACT_HIT", dag
+    
+        # --------------------------------------------------
+        # PARTIAL HIT
+        # --------------------------------------------------
+    
         candidates = self.storage.find_many(
             {"fingerprint": fingerprint},
             sort_by="validation_score"
         )
-
-        if candidates:
-            return "PARTIAL_HIT", candidates[0].get("dag")
-
+    
+        valid_candidates = [
+            c for c in candidates
+            if c.get("dag") is not None
+        ]
+    
+        if valid_candidates:
+            return "PARTIAL_HIT", valid_candidates[0]["dag"]
+    
+        # --------------------------------------------------
+        # MISS
+        # --------------------------------------------------
+    
         return "MISS", None
-
-
     

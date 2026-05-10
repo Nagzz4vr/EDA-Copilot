@@ -102,6 +102,9 @@ class PriorityScoring:
 
     def rank_signals(self, signals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         scored = []
+
+        print("before")
+        print(signals)
     
         for signal in signals:
             score = self.score_signal(signal)
@@ -113,6 +116,8 @@ class PriorityScoring:
             }
     
             scored.append(enriched)
+        print("after")
+        print(scored)
     
         return sorted(
             scored,

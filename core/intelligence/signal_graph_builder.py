@@ -14,11 +14,11 @@ class EdgeType(Enum):
 
 @dataclass(frozen=True)
 class ActionNode:
-    node_id: str
+    id: str
     action_type: str
     target_columns: tuple
-    benefit_score: float  # Normalized 0.0 - 1.0
-    cost_score: float     # Estimated 0.0 - 1.0
+    benefit_score: float
+    cost_score: float
     risk_level: RiskLevel
     originating_rule: str
 
@@ -32,6 +32,8 @@ class SignalGraphBuilder:
     def __init__(self):
         self.nodes:Dict[str,ActionNode]={}
         self.edges:List[ActionEdge]=[]
+        self._risk_order = ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+
 
     def _build_graph(self,scored_signals: List[Dict[str, Any]]) -> Dict[str, Any]:
 
@@ -41,11 +43,19 @@ class SignalGraphBuilder:
         self._map_relationships()
         return {
             "nodes": [
-                {**n.__dict__, "risk_level": n.risk_level.value} 
+                {
+                    "id": n.id,
+                    "action_type": n.action_type,
+                    "target_columns": list(n.target_columns),
+                    "benefit_score": n.benefit_score,
+                    "cost_score": n.cost_score,
+                    "risk_level": n.risk_level.value,
+                    "originating_rule": n.originating_rule
+                }
                 for n in self.nodes.values()
             ],
-            "edges": [
-                {**e.__dict__, "edge_type": e.edge_type.value} 
+          "edges": [
+                    {"source_id": e.source_id, "target_id": e.target_id, "edge_type": e.edge_type.value}
                 for e in self.edges
             ]
         }
@@ -88,14 +98,14 @@ class SignalGraphBuilder:
             rule_name = f"{existing.originating_rule}|{rule_name}"
 
         self.nodes[node_id] = ActionNode(
-            node_id=node_id,
-            action_type=act_type,
-            target_columns=cols,
-            benefit_score=benefit,
-            cost_score=cost,
-            risk_level=risk,
-            originating_rule=rule_name
-        )
+                            id=node_id,
+                            action_type=act_type,
+                            target_columns=cols,
+                            benefit_score=benefit,
+                            cost_score=cost,
+                            risk_level=risk,
+                            originating_rule=rule_name
+                                        )
 
     def _estimate_cost(self, action: str) -> float:
         costs = {
@@ -114,7 +124,7 @@ class SignalGraphBuilder:
         for i, node_a in enumerate(node_list):
             for node_b in node_list[i+1:]:
                 if self._is_conflict(node_a, node_b):
-                    self._add_edge(node_a.node_id, node_b.node_id, EdgeType.CONFLICTS_WITH, True, seen_edges)
+                    self._add_edge(node_a.id, node_b.id, EdgeType.CONFLICTS_WITH, True, seen_edges)
                 
 
                 self._check_prereq(node_a, node_b, seen_edges)

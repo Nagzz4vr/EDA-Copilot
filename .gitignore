@@ -2,10 +2,16 @@
 __pycache__/
 .venv/
 data/
+
 *.pyc
 *.ipynb
 *.csv
 *.svg
 *.txt
-!LICENSE.txt
+
+*.jsonl
+*.parquet
+*.pkl
 *.md
+# allow only license markdown/text explicitly
+!LICENSE.txt

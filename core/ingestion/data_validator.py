@@ -42,6 +42,7 @@ class ColumnSignals(BaseModel):
     high_cardinality: bool
     event_like: bool
     unique_ratio: float
+    is_target: bool = False 
 
 
 

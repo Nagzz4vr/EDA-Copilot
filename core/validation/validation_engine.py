@@ -26,29 +26,91 @@ class ValidationEngine:
         self.sample_tester = sample_tester
         self.logger = logger
 
-    def run(self, df_before: pd.DataFrame, target_column: str, transforms: list) -> ValidationReport:
+    def validate_plan(
+        self,
+        plan: Dict[str, Any],
+        df_before: pd.DataFrame,
+        target_column: str,
+    ) -> ValidationReport:
+
+        transforms = plan.get("actions", [])
+
+        return self.run(
+            df_before=df_before,
+            target_column=target_column,
+            transforms=transforms,
+        )
+
+    def run(
+        self,
+        df_before: pd.DataFrame,
+        target_column: str,
+        transforms: list
+    ) -> ValidationReport:
+
         X_before = df_before.drop(columns=[target_column])
         y_before = df_before[target_column]
-        (X_train_before, X_test_before, y_train_before, y_test_before) = train_test_split(X_before, y_before, test_size=0.2, random_state=42)
+
+        (
+            X_train_before,
+            X_test_before,
+            y_train_before,
+            y_test_before
+        ) = train_test_split(
+            X_before,
+            y_before,
+            test_size=0.2,
+            random_state=42
+        )
 
         baseline_model = DummyClassifier(strategy="most_frequent")
         baseline_model.fit(X_train_before, y_train_before)
-        preds_before = baseline_model.predict(X_test_before)
-        score_before = accuracy_score(y_test_before, preds_before)
 
-        df_after = self.sample_tester.apply(df_before.copy(), transforms)
+        preds_before = baseline_model.predict(X_test_before)
+
+        score_before = accuracy_score(
+            y_test_before,
+            preds_before
+        )
+
+        # Apply transforms safely
+        df_after = self.sample_tester.apply(
+            df_before.copy(),
+            transforms
+        )
+
+        if target_column not in df_after.columns:
+            raise ValueError(
+                f"Target column '{target_column}' missing after transforms"
+            )
 
         X_after = df_after.drop(columns=[target_column])
         y_after = df_after[target_column]
 
-        (X_train_after, X_test_after, y_train_after, y_test_after) = train_test_split(X_after, y_after, test_size=0.2, random_state=42)
+        (
+            X_train_after,
+            X_test_after,
+            y_train_after,
+            y_test_after
+        ) = train_test_split(
+            X_after,
+            y_after,
+            test_size=0.2,
+            random_state=42
+        )
 
         after_model = DummyClassifier(strategy="most_frequent")
         after_model.fit(X_train_after, y_train_after)
+
         preds_after = after_model.predict(X_test_after)
-        score_after = accuracy_score(y_test_after, preds_after)
+
+        score_after = accuracy_score(
+            y_test_after,
+            preds_after
+        )
 
         delta = score_after - score_before
+
         violations = []
 
         if delta < MINIMUM_ACCEPTABLE_DELTA:
@@ -58,16 +120,32 @@ class ValidationEngine:
             })
 
         if self.sample_tester.has_data_loss(df_before, df_after):
-            violations.append({"severity": "HIGH", "message": "Potential data loss detected"})
+            violations.append({
+                "severity": "HIGH",
+                "message": "Potential data loss detected"
+            })
 
         passed = len(violations) == 0
-        report = ValidationReport(passed=passed, delta=delta, score_before=score_before, score_after=score_after, violations=violations)
-        
+
+        report = ValidationReport(
+            passed=passed,
+            delta=delta,
+            score_before=score_before,
+            score_after=score_after,
+            violations=violations
+        )
+
         self.logger.log(
             tool="VALIDATION_ENGINE",
             intent="Validation completed",
-            inputs={"num_transforms": len(transforms)},
-            outputs={"passed": passed, "delta": delta},
+            inputs={
+                "num_transforms": len(transforms)
+            },
+            outputs={
+                "passed": passed,
+                "delta": delta
+            },
             confidence=0.95
         )
+
         return report

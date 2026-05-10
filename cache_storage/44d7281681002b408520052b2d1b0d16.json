@@ -1,0 +1,330 @@
+{
+  "state_uuid": "44d7281681002b408520052b2d1b0d16",
+  "planner_bundle": {
+    "optimized_plan": {
+      "version": 1,
+      "actions": [
+        {
+          "id": "IMPUTE_MEAN_Cabin",
+          "action_type": "IMPUTE_MEAN",
+          "target_columns": [
+            "Cabin"
+          ],
+          "parameters": {
+            "benefit_score": 0.9,
+            "cost_score": 0.1,
+            "risk_level": "LOW",
+            "originating_rule": "R1.5_high_missing"
+          },
+          "metadata": {}
+        },
+        {
+          "id": "LABEL_ENCODE_Sex_Survived",
+          "action_type": "LABEL_ENCODE",
+          "target_columns": [
+            "Sex",
+            "Survived"
+          ],
+          "parameters": {
+            "benefit_score": 0.1728,
+            "cost_score": 0.2,
+            "risk_level": "LOW",
+            "originating_rule": "R3.3_Binary_Categorical"
+          },
+          "metadata": {}
+        },
+        {
+          "id": "SKIP_DEDUPLICATION_dataset",
+          "action_type": "SKIP_DEDUPLICATION",
+          "target_columns": [
+            "dataset"
+          ],
+          "parameters": {
+            "benefit_score": 0.10200000000000004,
+            "cost_score": 0.2,
+            "risk_level": "LOW",
+            "originating_rule": "R1.3_no_duplicates"
+          },
+          "metadata": {}
+        },
+        {
+          "id": "GENERATE_PLOTS_dataset",
+          "action_type": "GENERATE_PLOTS",
+          "target_columns": [
+            "dataset"
+          ],
+          "parameters": {
+            "benefit_score": 0.95,
+            "cost_score": 0.2,
+            "risk_level": "LOW",
+            "originating_rule": "R5.3_categorical_bar_chart|R5.1_numeric_distribution_plot|R5.4_high_cardinality_bar_chart|R5.2_skewed_numeric_log_plot|R5.5_correlation_heatmap_trigger"
+          },
+          "metadata": {}
+        },
+        {
+          "id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp",
+          "action_type": "ONE_HOT_ENCODE",
+          "target_columns": [
+            "Embarked",
+            "Parch",
+            "Pclass",
+            "SibSp"
+          ],
+          "parameters": {
+            "benefit_score": 0.1888,
+            "cost_score": 0.4,
+            "risk_level": "LOW",
+            "originating_rule": "R3.4_Low_Card_One_Hot"
+          },
+          "metadata": {}
+        },
+        {
+          "id": "EXCLUDE_FROM_MODELING_Name",
+          "action_type": "EXCLUDE_FROM_MODELING",
+          "target_columns": [
+            "Name"
+          ],
+          "parameters": {
+            "benefit_score": 0.5920000000000001,
+            "cost_score": 0.2,
+            "risk_level": "LOW",
+            "originating_rule": "R2.1_Definite_ID_Column"
+          },
+          "metadata": {}
+        },
+        {
+          "id": "RECLASSIFY_AS_ID_PassengerId",
+          "action_type": "RECLASSIFY_AS_ID",
+          "target_columns": [
+            "PassengerId"
+          ],
+          "parameters": {
+            "benefit_score": 0.7490000000000001,
+            "cost_score": 0.2,
+            "risk_level": "MEDIUM",
+            "originating_rule": "R2.5_Numeric_ID_Masquerade"
+          },
+          "metadata": {}
+        }
+      ],
+      "metadata": {
+        "total_benefit": 3.6546000000000003,
+        "total_cost": 1.4999999999999998,
+        "max_risk": "MEDIUM",
+        "estimated_memory_delta_mb": 0.0
+      },
+      "speculative_candidates": [
+        {
+          "id": "IMPUTE_KNN_Cabin",
+          "action_type": "IMPUTE_KNN",
+          "target_columns": [
+            "Cabin"
+          ],
+          "benefit_score": 1.08,
+          "cost_score": 0.6,
+          "risk_level": "MEDIUM",
+          "originating_rule": "R1.5_high_missing"
+        }
+      ]
+    },
+    "signal_graph": {
+      "nodes": [
+        {
+          "id": "IMPUTE_MEAN_Cabin",
+          "action_type": "IMPUTE_MEAN",
+          "target_columns": [
+            "Cabin"
+          ],
+          "benefit_score": 0.9,
+          "cost_score": 0.1,
+          "risk_level": "LOW",
+          "originating_rule": "R1.5_high_missing"
+        },
+        {
+          "id": "IMPUTE_KNN_Cabin",
+          "action_type": "IMPUTE_KNN",
+          "target_columns": [
+            "Cabin"
+          ],
+          "benefit_score": 1.08,
+          "cost_score": 0.6,
+          "risk_level": "MEDIUM",
+          "originating_rule": "R1.5_high_missing"
+        },
+        {
+          "id": "RECLASSIFY_AS_ID_PassengerId",
+          "action_type": "RECLASSIFY_AS_ID",
+          "target_columns": [
+            "PassengerId"
+          ],
+          "benefit_score": 0.7490000000000001,
+          "cost_score": 0.2,
+          "risk_level": "MEDIUM",
+          "originating_rule": "R2.5_Numeric_ID_Masquerade"
+        },
+        {
+          "id": "EXCLUDE_FROM_MODELING_Name",
+          "action_type": "EXCLUDE_FROM_MODELING",
+          "target_columns": [
+            "Name"
+          ],
+          "benefit_score": 0.5920000000000001,
+          "cost_score": 0.2,
+          "risk_level": "LOW",
+          "originating_rule": "R2.1_Definite_ID_Column"
+        },
+        {
+          "id": "GENERATE_PLOTS_dataset",
+          "action_type": "GENERATE_PLOTS",
+          "target_columns": [
+            "dataset"
+          ],
+          "benefit_score": 0.95,
+          "cost_score": 0.2,
+          "risk_level": "LOW",
+          "originating_rule": "R5.3_categorical_bar_chart|R5.1_numeric_distribution_plot|R5.4_high_cardinality_bar_chart|R5.2_skewed_numeric_log_plot|R5.5_correlation_heatmap_trigger"
+        },
+        {
+          "id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp",
+          "action_type": "ONE_HOT_ENCODE",
+          "target_columns": [
+            "Embarked",
+            "Parch",
+            "Pclass",
+            "SibSp"
+          ],
+          "benefit_score": 0.1888,
+          "cost_score": 0.4,
+          "risk_level": "LOW",
+          "originating_rule": "R3.4_Low_Card_One_Hot"
+        },
+        {
+          "id": "LABEL_ENCODE_Sex_Survived",
+          "action_type": "LABEL_ENCODE",
+          "target_columns": [
+            "Sex",
+            "Survived"
+          ],
+          "benefit_score": 0.1728,
+          "cost_score": 0.2,
+          "risk_level": "LOW",
+          "originating_rule": "R3.3_Binary_Categorical"
+        },
+        {
+          "id": "SKIP_DEDUPLICATION_dataset",
+          "action_type": "SKIP_DEDUPLICATION",
+          "target_columns": [
+            "dataset"
+          ],
+          "benefit_score": 0.10200000000000004,
+          "cost_score": 0.2,
+          "risk_level": "LOW",
+          "originating_rule": "R1.3_no_duplicates"
+        }
+      ],
+      "edges": [
+        {
+          "source_id": "IMPUTE_MEAN_Cabin",
+          "target_id": "IMPUTE_KNN_Cabin",
+          "edge_type": "CONFLICTS_WITH"
+        },
+        {
+          "source_id": "IMPUTE_KNN_Cabin",
+          "target_id": "IMPUTE_MEAN_Cabin",
+          "edge_type": "CONFLICTS_WITH"
+        }
+      ]
+    },
+    "validation_report": {
+      "passed": false,
+      "violations": [
+        {
+          "severity": "HIGH",
+          "message": "Model performance degraded by -0.0300"
+        }
+      ]
+    },
+    "fingerprint": "dee56f7634601fc862120c6093b4f10890b0024741d684cb29c022c0c05b5e04"
+  },
+  "actions_executed": [
+    "IMPUTE_MEAN",
+    "LABEL_ENCODE",
+    "SKIP_DEDUPLICATION",
+    "GENERATE_PLOTS",
+    "ONE_HOT_ENCODE",
+    "EXCLUDE_FROM_MODELING",
+    "RECLASSIFY_AS_ID"
+  ],
+  "rows_processed": 891,
+  "actions_applied": [
+    {
+      "node_id": "IMPUTE_MEAN_Cabin_Cabin",
+      "operation": "impute",
+      "column": "Cabin",
+      "status": "SUCCESS"
+    },
+    {
+      "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_Embarked",
+      "operation": "encode",
+      "column": "Embarked",
+      "status": "SUCCESS"
+    },
+    {
+      "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_Parch",
+      "operation": "encode",
+      "column": "Parch",
+      "status": "SUCCESS"
+    },
+    {
+      "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_Pclass",
+      "operation": "encode",
+      "column": "Pclass",
+      "status": "SUCCESS"
+    },
+    {
+      "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_SibSp",
+      "operation": "encode",
+      "column": "SibSp",
+      "status": "SUCCESS"
+    }
+  ],
+  "timestamp": "2026-05-10T12:25:38.690370",
+  "status": "COMPLETED",
+  "result": {
+    "rows_processed": 891,
+    "actions_applied": [
+      {
+        "node_id": "IMPUTE_MEAN_Cabin_Cabin",
+        "operation": "impute",
+        "column": "Cabin",
+        "status": "SUCCESS"
+      },
+      {
+        "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_Embarked",
+        "operation": "encode",
+        "column": "Embarked",
+        "status": "SUCCESS"
+      },
+      {
+        "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_Parch",
+        "operation": "encode",
+        "column": "Parch",
+        "status": "SUCCESS"
+      },
+      {
+        "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_Pclass",
+        "operation": "encode",
+        "column": "Pclass",
+        "status": "SUCCESS"
+      },
+      {
+        "node_id": "ONE_HOT_ENCODE_Embarked_Parch_Pclass_SibSp_SibSp",
+        "operation": "encode",
+        "column": "SibSp",
+        "status": "SUCCESS"
+      }
+    ],
+    "dag_version": "1.0",
+    "errors": []
+  }
+}
