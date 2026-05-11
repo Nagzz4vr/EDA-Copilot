@@ -23,6 +23,7 @@ class RiskEngine:
         "target_encode",
         "schema_mutation",
         "delete_feature",
+        "impute_median",   # temporary for testing
     }
 
     def __init__(self, logger):
@@ -106,7 +107,7 @@ class HITL:
             confidence=1.0
         )
         return {
-            "action": "APPROVE" | "REJECT",
+            "action": action,
             "state_uuid": state_uuid,
             "risk_level": risk_result["risk_level"]
                 }

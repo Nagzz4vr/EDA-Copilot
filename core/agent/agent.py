@@ -1,76 +1,240 @@
+import os
 import json
+import asyncio
+from typing import Optional, Any, Dict
+from pydantic import BaseModel, Field
 from litellm import completion
+from dotenv import load_dotenv
 from .decision_schema import AgentReview
 from observability.trace_logger import TraceLogger
 
-class ReviewerAgent:
-    def __init__(self, model: str = "gpt-4o", session_id: str = "unset"):
-        self.model = model
+load_dotenv()
+
+
+
+class PlanResult(BaseModel):
+    actions:          list[dict]
+    confidence_score: float = Field(ge=0.0, le=1.0)
+    tokens_used:      int   = 0
+    reasoning:        str   = ""
+    metadata:         dict  = Field(default_factory=dict)
+
+
+
+class PlannerAgent:
+    def __init__(self, session_id: str = "unset"):
+        self.api_key    = os.environ["OPENROUTER_API_KEY"]
+        self.model      = f"openrouter/{os.getenv('OPENROUTER_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')}"
+        print("MODEL:", self.model)
         self.session_id = session_id
+        self.headers    = {
+            "HTTP-Referer": os.getenv("SITE_URL", "http://localhost"),
+            "X-Title":      os.getenv("SITE_NAME", "ml-pipeline"),
+        }
         self.logger = TraceLogger(session_id=session_id)
 
-    def _build_system_prompt(self) -> str:
+
+
+    def _build_planner_system_prompt(self) -> str:
         return """
-            You are a Data Plan Reviewer (not a planner).
+You are a Data Transformation Planner for ML pipelines.
 
-            INPUT:
-            - GlobalImpactReport: expected dataset-level effects
-            - ProposedPlan: ordered actions with action_id, type, parameters
+INPUT you will receive:
+- signal_graph:       nodes describing data quality issues detected
+- canonical_context:  dataset statistics, column types, target column
+- rejection_feedback: (optional) why the previous plan was rejected
 
-            TASK:
-            Audit the plan for correctness and risk.
+YOUR TASK:
+Produce a transformation plan that resolves the signals.
 
-            CHECK:
-            1. Logical consistency (conflicting or redundant actions)
-            2. Data integrity risks (excessive data loss, distortion)
-            3. Statistical validity (wrong transformations/imputations)
-            4. Leakage or target misuse
-            5. Alignment with GlobalImpactReport
+RULES:
+- Only use these action_types:
+    impute_mean, impute_median, impute_mode, impute_constant,
+    drop_column, drop_rows, one_hot_encode, ordinal_encode,
+    label_encode, scale_standard, scale_minmax, scale_robust,
+    log_transform, clip_outliers, remove_outliers,
+    type_cast, rename_column, fill_forward, fill_backward
+- Every action must have a unique action_id (e.g. "act_001")
+- Never touch the target column unless imputing it
+- If rejection_feedback is present, directly address the concerns raised
 
-            ACTIONS:
-            - Approve if plan is sound
-            - Override only if a specific action is incorrect
-            - Reject if plan is unsafe
+OUTPUT FORMAT — return only valid JSON, no markdown, no explanation:
+{
+  "actions": [
+    {
+      "action_id":   "act_001",
+      "action_type": "impute_median",
+      "column":      "age",
+      "parameters":  {},
+      "rationale":   "35% missing values, numeric column"
+    }
+  ],
+  "confidence_score": 0.85,
+  "reasoning": "Brief explanation of the overall strategy"
+}
+        """.strip()
 
-            CONSTRAINTS:
-            - Do NOT create new actions
-            - Do NOT redesign the plan
-            - Overrides must reference existing action_id
-            - Keep overrides minimal and precise
+    async def generate_plan(
+        self,
+        signal_graph:       Any,
+        canonical_context:  Any,
+        rejection_feedback: Optional[dict] = None,
+    ) -> PlanResult:
 
-            OUTPUT:
-            Return valid JSON (AgentReview schema) with:
-            - approved (bool)
-            - overrides (list of targeted fixes)
-            - global_flags (predefined risk signals if any)
-            - confidence (0–1)
-            - reasoning (concise, reference action_id where relevant)
-                """.strip()
-    
-    def review_plan(self,impact_report:dict,optimized_plan:dict)->AgentReview:
-        prompt={
-            "simulation_results":impact_report,
-            "proposed_action":optimized_plan
+        graph_dict = (
+            signal_graph.model_dump()
+            if hasattr(signal_graph, "model_dump")
+            else signal_graph
+        )
+        context_dict = (
+            canonical_context.canonical_data.model_dump()
+            if hasattr(canonical_context, "canonical_data")
+            else canonical_context
+        )
+
+        payload: dict = {
+            "signal_graph":      graph_dict,
+            "canonical_context": context_dict,
         }
-        response = completion(
+        if rejection_feedback:
+            payload["rejection_feedback"] = rejection_feedback
+
+        response = await asyncio.to_thread(
+            completion,
             model=self.model,
+            api_key=self.api_key,
             messages=[
-                {"role": "system", "content": self._build_system_prompt()},
-                {"role": "user", "content": json.dumps(prompt)}
+                {"role": "system", "content": self._build_planner_system_prompt()},
+                {"role": "user",   "content": json.dumps(payload)},
             ],
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            extra_headers=self.headers,
         )
 
         raw_content = response.choices[0].message.content
-        review_dict = json.loads(raw_content)
-        review = AgentReview(**review_dict)
+        tokens_used = getattr(response.usage, "total_tokens", 0)
+
+        try:
+            parsed = json.loads(raw_content)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"PlannerAgent returned non-JSON: {e}\nRaw: {raw_content[:500]}"
+            )
+
+        if "actions" not in parsed:
+            raise RuntimeError(
+                f"PlannerAgent response missing 'actions'. Got keys: {list(parsed.keys())}"
+            )
+
+        self.logger.log(
+            tool="planner_agent",
+            intent="plan_generated",
+            inputs={"has_rejection_feedback": rejection_feedback is not None},
+            outputs={
+                "action_count":    len(parsed["actions"]),
+                "confidence_score": parsed.get("confidence_score", 0.0),
+            },
+            confidence=parsed.get("confidence_score", 0.0),
+        )
+
+        return PlanResult(
+            actions=          parsed["actions"],
+            confidence_score= float(parsed.get("confidence_score", 0.7)),
+            tokens_used=      tokens_used,
+            reasoning=        parsed.get("reasoning", ""),
+            metadata=         parsed.get("metadata", {}),
+        )
+
+   
+
+    def _build_reviewer_system_prompt(self) -> str:
+        return """
+You are a Data Plan Reviewer (not a planner).
+
+INPUT:
+- simulation_results: expected dataset-level effects (may be null on first review)
+- proposed_action:    ordered actions with action_id, type, parameters
+- rejection_feedback: (optional) previous rejection reasons if this is a replan
+
+TASK:
+Audit the plan for correctness and risk.
+
+CHECK:
+1. Logical consistency (conflicting or redundant actions)
+2. Data integrity risks (excessive data loss, distortion)
+3. Statistical validity (wrong transformations/imputations)
+4. Leakage or target misuse
+5. Alignment with simulation_results if available
+6. If replanning: verify previously flagged issues are addressed
+
+ACTIONS:
+- Approve if plan is sound
+- Override only if a specific action is incorrect (reference its action_id)
+- Reject if plan is fundamentally unsafe
+
+CONSTRAINTS:
+- Do NOT create new actions
+- Do NOT redesign the plan
+- Overrides must reference existing action_id
+- Keep overrides minimal and precise
+
+OUTPUT — return only valid JSON, no markdown:
+{
+  "approved": true,
+  "overrides": [],
+  "global_flags": [],
+  "confidence": 0.9,
+  "reasoning": "Plan is sound. All missing value columns use appropriate strategies."
+}
+        """.strip()
+
+    async def review_plan(
+        self,
+        impact_report:      Any,
+        optimized_plan:     dict,
+        rejection_feedback: Optional[Dict[str, Any]] = None,
+    ) -> AgentReview:
+
+        prompt: dict = {
+            "simulation_results": impact_report or "Not yet available — pre-simulation review",
+            "proposed_action":    optimized_plan,
+        }
+        if rejection_feedback:
+            prompt["rejection_feedback"] = rejection_feedback
+            prompt["is_replan"]          = True
+
+        response = await asyncio.to_thread(
+            completion,
+            model=self.model,
+            api_key=self.api_key,
+            messages=[
+                {"role": "system", "content": self._build_reviewer_system_prompt()},
+                {"role": "user",   "content": json.dumps(prompt, indent=2)},
+            ],
+            response_format={"type": "json_object"},
+            extra_headers=self.headers,
+        )
+
+        raw_content = response.choices[0].message.content
+
+        try:
+            review_dict = json.loads(raw_content)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"ReviewerAgent returned non-JSON: {e}\nRaw: {raw_content[:500]}"
+            )
+
+        review = AgentReview.model_validate(review_dict)
 
         self.logger.log(
             tool="reviewer_agent",
             intent="plan_audit",
-            inputs={"plan_version": optimized_plan.get("version")},
-            outputs=review.dict(),
-            confidence=review.confidence
+            inputs={
+                "plan_version": optimized_plan.get("version"),
+                "is_replan":    rejection_feedback is not None,
+            },
+            outputs=review.model_dump(),
+            confidence=review.confidence,
         )
 
         return review

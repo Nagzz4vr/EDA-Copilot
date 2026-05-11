@@ -51,6 +51,8 @@ class MetaAgent:
         self.context_compressor = kwargs["context_compressor"]
         self.agent              = kwargs["agent"]  # LLM planner
         self.hitl               = kwargs.get("hitl")
+        self.risk_engine        = kwargs["risk_engine"]     
+        self.reviewer           = kwargs["reviewer"]        
 
         self.graph_builder        = kwargs["signal_graph_builder"]
         self.optimizer            = kwargs["plan_optimizer"]
@@ -68,6 +70,7 @@ class MetaAgent:
         self.pipeline_exporter = kwargs["pipeline_exporter"]
         self.report_generator  = kwargs["report_generator"]
         self.state_manager     = kwargs["state_manager"]
+
         self.budget_controller  = kwargs.get("budget_controller")
         self.token_ledger       = kwargs.get("token_ledger")
 
@@ -78,16 +81,16 @@ class MetaAgent:
 
         self.plan:             Optional[Any] = None
         self.signal_bag:       Optional[Any] = None
-        self.signal_graph:     Optional[Any] = None
-        self.optimized_plan:   Optional[Any] = None
         self.impact_report:    Optional[Any] = None
         self.canonical_output: Optional[Any] = None
         self.state_uuid:       Optional[str] = None
         self.confidence_score: float = 0.0
 
-
+        self.rejection_feedback: Optional[Dict[str, Any]] = None
         self.execution_result:  Optional[Any] = None
         self.cache_hit: bool = False
+        self.review_iterations: int = 0
+        self.max_review_iterations: int = kwargs.get("max_review_iterations", 3)
 
 
 
@@ -336,12 +339,30 @@ class MetaAgent:
                     tokens_used=plan_result.tokens_used,
                 )
 
+            normalized_actions = []
+
+            for action in plan_result.actions:
+            
+                normalized_action = {
+                    "id": action.get("action_id"),
+                    "action_type": action.get("action_type"),
+                    "target_columns": [action.get("column")]
+                    if action.get("column")
+                    else [],
+                    "parameters": action.get("parameters", {}),
+                    "rationale": action.get("rationale", "")
+                }
+
+                normalized_actions.append(normalized_action)
+
             self.decision_plan = DecisionPlan(
-                actions=plan_result.actions,
+                actions=normalized_actions,
                 confidence_score=plan_result.confidence_score,
-                reasoning=getattr(plan_result, "reasoning", ""),
-                metadata=getattr(plan_result, "metadata", {}),
+                reasoning=plan_result.reasoning,
+                metadata=plan_result.metadata
             )
+
+            self.plan=self.decision_plan
             
             self.confidence_score = plan_result.confidence_score
 
@@ -385,9 +406,6 @@ class MetaAgent:
         )
 
         try:
-            # ─────────────────────────────────────────
-            # 1. Resolve plan safely (single source)
-            # ─────────────────────────────────────────
             plan = self.plan
             if plan is None:
                 raise RuntimeError("No plan available for review phase")
@@ -408,13 +426,26 @@ class MetaAgent:
                 if not self.hitl:
                     raise RuntimeError("HITL required but not configured")
 
-                action = await self.hitl.request_approval(
-                    plan=plan_dict,
-                    risk_result=risk_result,
-                    state_uuid=self.state_uuid,
-                )
+                approval_response = await asyncio.wait_for(
+                                    self.hitl.request_approval(
+                                        plan=plan_dict,
+                                        risk_result=risk_result,
+                                        state_uuid=self.state_uuid,
+                                    ),
+                                    timeout=1800  # 1 hour
+                                    )
 
-                if action == "REJECT":
+
+                if approval_response["action"] == "REJECT":
+                    self.rejection_feedback = {
+                        "source": "HITL",
+                        "risk_reasons": risk_result["reasons"],
+                        "rejected_operations": [
+                            t["operation"] for t in plan_dict.get("transforms", [])
+                            if t.get("operation") in self.risk_engine.HIGH_RISK_OPERATIONS
+                        ],
+                        "message": "Human reviewer rejected this plan due to high-risk operations"
+                            }
                     self.logger.log(
                         tool="HITL",
                         intent="Human rejected plan",
@@ -422,31 +453,43 @@ class MetaAgent:
                         outputs={},
                         confidence=1.0
                     )
-                    return State.REFINING
+                    return State.PLANNING
 
                 self.logger.log(
                     tool="HITL",
                     intent="Human approved plan",
                     inputs={"state_uuid": self.state_uuid},
-                    outputs={"action": action},
+                    outputs={"action": approval_response["action"]},
                     confidence=1.0
                 )
 
 
-            review_result = self.reviewer.review_plan(
+            review_result = await self.reviewer.review_plan(
                 impact_report=self.impact_report,
-                optimized_plan=plan_dict
+                optimized_plan=plan_dict,
+                rejection_feedback=self.rejection_feedback
             )
 
             if not review_result.approved:
+                self.rejection_feedback = {
+                "source": "REVIEWER",
+                "concerns": review_result.model_dump(),
+                "message": f"Plan reviewer identified issues: {review_result.reasons if hasattr(review_result, 'reasons') else 'See concerns'}"
+                }
                 self.logger.log(
                     tool="REVIEW",
-                    intent="LLM rejected plan",
+                    intent="LLM rejected plan - capturing feedback",
                     inputs={},
-                    outputs=review_result.model_dump(),
+                    outputs=self.rejection_feedback,
                     confidence=0.3
                 )
-                return State.REFINING
+                self.review_iterations += 1
+                if self.review_iterations >= self.max_review_iterations:
+                    raise RuntimeError(
+                        f"Plan rejected {self.review_iterations} times — "
+                        "max review iterations reached. Aborting."
+                    )
+                return State.PLANNING
 
 
             if review_result.overrides:
@@ -475,15 +518,22 @@ class MetaAgent:
 
             return State.OPTIMIZING
 
-        except Exception as exc:
+        except asyncio.TimeoutError:
+
             self.logger.log(
-                tool="REVIEW_ERROR",
-                intent="Review failed",
-                inputs={},
-                outputs={"error": str(exc)},
-                confidence=0.0
+                tool="HITL",
+                intent="Approval timeout",
+                inputs={"state_uuid": self.state_uuid},
+                outputs={"timeout_seconds": 3600},
+                confidence=0.2
             )
-            raise
+
+            self.rejection_feedback = {
+                "source": "HITL_TIMEOUT",
+                "message": "Human approval request timed out",
+            }
+
+            return State.FAILED
 
 
     async def _optimize(self) -> State:
@@ -491,7 +541,7 @@ class MetaAgent:
                         inputs={}, outputs={}, confidence=1.0)
         try:
             raw_plan = await asyncio.to_thread(
-                self.optimizer.optimize, self.signal_graph.model_dump()
+                self.optimizer.optimize, self.plan
             )
 
             self.optimized_plan = self._coerce_to_optimized_plan(raw_plan)
@@ -842,6 +892,15 @@ class MetaAgent:
             if total >= limit:
                 break
 
+    def _apply_overrides(self, plan_dict: dict, overrides: list) -> dict:
+        action_index = {a["action_id"]: a for a in plan_dict.get("actions", [])}
+        for override in overrides:
+            target = action_index.get(override.action_id)
+            if target:
+                target["action_type"] = override.new_action_type
+                target.update(override.new_parameters or {})
+        return plan_dict
+    
     def _to_plan_dict(self) -> dict:
 
         p = self.optimized_plan

@@ -15,3 +15,7 @@ data/
 *.md
 # allow only license markdown/text explicitly
 !LICENSE.txt
+
+cache_storage/
+outputs/
+traces/
