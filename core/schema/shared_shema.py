@@ -15,3 +15,5 @@ class ExecutionPlan:
     actions: List[Dict[str, Any]]
     metadata: PlanMetadata
     speculative_candidates: List[Dict[str, Any]]
+
+

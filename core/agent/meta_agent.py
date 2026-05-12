@@ -69,6 +69,7 @@ class MetaAgent:
         self.dataset_writer    = kwargs["dataset_writer"]
         self.pipeline_exporter = kwargs["pipeline_exporter"]
         self.report_generator  = kwargs["report_generator"]
+
         self.state_manager     = kwargs["state_manager"]
 
         self.budget_controller  = kwargs.get("budget_controller")
@@ -101,6 +102,7 @@ class MetaAgent:
                 if self.state == State.PERCEIVING:
                     self._transition(State.PERCEIVING, trigger="AGENT_START")
                     self.state = await self._perceive()
+                
 
                 elif self.state == State.SIGNALING:
                     self._transition(State.SIGNALING, trigger="CACHE_MISS")
@@ -341,18 +343,24 @@ class MetaAgent:
 
             normalized_actions = []
 
-            for action in plan_result.actions:
+            for i, action in enumerate(plan_result.actions):
             
-                normalized_action = {
-                    "id": action.get("action_id"),
-                    "action_type": action.get("action_type"),
-                    "target_columns": [action.get("column")]
-                    if action.get("column")
-                    else [],
-                    "parameters": action.get("parameters", {}),
-                    "rationale": action.get("rationale", "")
-                }
+                raw_id = action.get("action_id") or action.get("id")
+                safe_id = str(raw_id) if raw_id is not None else f"act_{i}_{int(time.time())}"
 
+                raw_type = action.get("action_type")
+                safe_type = str(raw_type) if raw_type is not None else "unknown_transform"
+
+                normalized_action = {
+        "id": safe_id,
+        "action_type": safe_type,
+        "target_columns": [action.get("column")] if action.get("column") else [],
+        "parameters": {
+            **action.get("parameters", {}),
+            "rationale": action.get("rationale", ""),
+        },
+        "metadata": action.get("metadata", {})
+    }
                 normalized_actions.append(normalized_action)
 
             self.decision_plan = DecisionPlan(
@@ -368,11 +376,11 @@ class MetaAgent:
 
 
             await asyncio.to_thread(
-                self.confidence_tracker.record,
-                phase="PLANNING",
-                score=self.confidence_score,
-            )
-
+    self.confidence_tracker.update,          # 1. Correct method name
+    state_uuid=self.state_uuid,             # 2. Add the missing UUID
+    step="PLANNING",                        # 3. Maps to 'step'
+    score=float(self.confidence_score or 0.0) # 4. Maps to 'score'
+)
             self.logger.log(
                 tool="PLAN",
                 intent="Plan generated",
@@ -540,10 +548,16 @@ class MetaAgent:
         self.logger.log(tool="PLAN_OPTIMIZER", intent="Starting optimization",
                         inputs={}, outputs={}, confidence=1.0)
         try:
-            raw_plan = await asyncio.to_thread(
-                self.optimizer.optimize, self.plan
-            )
+            graph_payload = (
+    self.signal_graph.model_dump()
+    if hasattr(self.signal_graph, "model_dump")
+    else self.signal_graph
+)
 
+            raw_plan = await asyncio.to_thread(
+    self.optimizer.optimize,
+    graph_payload
+)
             self.optimized_plan = self._coerce_to_optimized_plan(raw_plan)
  
             self.logger.log(
@@ -745,22 +759,19 @@ class MetaAgent:
                     "execution_result is None in FINALIZING — "
                     "_execute must complete successfully before _finalize runs."
                 )
- 
-            # ── write dataset ──────────────────────────────────────────────
+
             dataset_manifest = await asyncio.to_thread(
                 self.dataset_writer.write,
                 self.execution_result,
                 self.context["job_id"],
             )
- 
-            # ── export sklearn pipeline ────────────────────────────────────
+
             pipeline_manifest = await asyncio.to_thread(
                 self.pipeline_exporter.export,
                 self.optimized_plan.model_dump(),
                 self.context["job_id"],
             )
- 
-            # ── generate decision report ───────────────────────────────────
+
             report_path = await asyncio.to_thread(
                 self.report_generator.generate,
                 self.optimized_plan.model_dump(),
@@ -771,9 +782,7 @@ class MetaAgent:
                 self.validation_report.model_dump() if self.validation_report else None,
             )
  
-            # ── persist PlannerBundle — SINGLE SOURCE OF TRUTH ────────────
-            # Rule: only PlannerBundle crosses the persistence boundary.
-            # DataFrames live exclusively in DatasetWriter output files.
+
             bundle = PlannerBundle(
                 signal_graph=self.signal_graph or SignalGraph(nodes=[], edges=[]),
                 optimized_plan=self.optimized_plan,

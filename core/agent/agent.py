@@ -1,14 +1,25 @@
+
 import os
 import json
 import asyncio
-from typing import Optional, Any, Dict
+import time
+from typing import Optional, Any, Dict, List
 from pydantic import BaseModel, Field
 from litellm import completion
+from litellm.exceptions import RateLimitError, NotFoundError, ServiceUnavailableError
 from dotenv import load_dotenv
 from .decision_schema import AgentReview
 from observability.trace_logger import TraceLogger
 
 load_dotenv()
+
+
+MODEL_POOL: List[str] = [
+    "groq/llama-3.3-70b-versatile",  # High quality for planning
+    "groq/llama-3.1-8b-instant",    # Fast fallback
+    "groq/qwen-2.5-coder-32b",       # Good for logic/JSON
+]
+RETRY_AFTER_SECONDS = 10   
 
 
 
@@ -18,20 +29,72 @@ class PlanResult(BaseModel):
     tokens_used:      int   = 0
     reasoning:        str   = ""
     metadata:         dict  = Field(default_factory=dict)
+    model_used:       str   = ""   # for observability
 
 
 
 class PlannerAgent:
     def __init__(self, session_id: str = "unset"):
-        self.api_key    = os.environ["OPENROUTER_API_KEY"]
-        self.model      = f"openrouter/{os.getenv('OPENROUTER_MODEL', 'meta-llama/llama-3.1-8b-instruct:free')}"
-        print("MODEL:", self.model)
+        self.api_key    = os.environ["GROQ_API_KEY"]
         self.session_id = session_id
         self.headers    = {
             "HTTP-Referer": os.getenv("SITE_URL", "http://localhost"),
             "X-Title":      os.getenv("SITE_NAME", "ml-pipeline"),
         }
-        self.logger = TraceLogger(session_id=session_id)
+        self.logger        = TraceLogger(session_id=session_id)
+        self._model_pool   = MODEL_POOL.copy()
+        self._model_index  = 0   # tracks current model across calls
+
+    @property
+    def _current_model(self) -> str:
+        return self._model_pool[self._model_index]
+
+    def _rotate_model(self) -> str:
+        """Advance to next model in pool. Returns the new model string."""
+        self._model_index = (self._model_index + 1) % len(self._model_pool)
+        new_model = self._current_model
+        self.logger.log(
+            tool="MODEL_ROTATOR",
+            intent=f"Rotated to {new_model}",
+            inputs={}, outputs={"model": new_model}, confidence=1.0,
+        )
+        return new_model
+
+    async def _call_with_fallback(self, messages: list, context: str) -> tuple[Any, str]:
+        attempts = 0
+        last_error = None
+
+        while attempts < len(self._model_pool):
+            model = self._current_model
+            try:
+                response = await asyncio.to_thread(
+                    completion,
+                    model=model,
+                    api_key=self.api_key,
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                    extra_headers=self.headers,
+                )
+                return response, model
+
+            except (RateLimitError, NotFoundError, ServiceUnavailableError) as e:
+                last_error = e
+                self.logger.log(
+                    tool="MODEL_ROTATOR",
+                    intent=f"{type(e).__name__} on {model} ({context}) — rotating",
+                    inputs={}, outputs={"error": str(e)}, confidence=0.5,
+                )
+                self._rotate_model()
+                await asyncio.sleep(RETRY_AFTER_SECONDS)
+                attempts += 1
+
+            except Exception as e:
+                raise
+
+        raise RuntimeError(
+            f"All {len(self._model_pool)} models exhausted for {context}. "
+            f"Last error: {last_error}"
+        )
 
 
 
@@ -99,17 +162,12 @@ OUTPUT FORMAT — return only valid JSON, no markdown, no explanation:
         if rejection_feedback:
             payload["rejection_feedback"] = rejection_feedback
 
-        response = await asyncio.to_thread(
-            completion,
-            model=self.model,
-            api_key=self.api_key,
-            messages=[
-                {"role": "system", "content": self._build_planner_system_prompt()},
-                {"role": "user",   "content": json.dumps(payload)},
-            ],
-            response_format={"type": "json_object"},
-            extra_headers=self.headers,
-        )
+        messages = [
+            {"role": "system", "content": self._build_planner_system_prompt()},
+            {"role": "user",   "content": json.dumps(payload)},
+        ]
+
+        response, model_used = await self._call_with_fallback(messages, context="planner")
 
         raw_content = response.choices[0].message.content
         tokens_used = getattr(response.usage, "total_tokens", 0)
@@ -118,12 +176,14 @@ OUTPUT FORMAT — return only valid JSON, no markdown, no explanation:
             parsed = json.loads(raw_content)
         except json.JSONDecodeError as e:
             raise RuntimeError(
-                f"PlannerAgent returned non-JSON: {e}\nRaw: {raw_content[:500]}"
+                f"PlannerAgent ({model_used}) returned non-JSON: {e}\n"
+                f"Raw: {raw_content[:500]}"
             )
 
         if "actions" not in parsed:
             raise RuntimeError(
-                f"PlannerAgent response missing 'actions'. Got keys: {list(parsed.keys())}"
+                f"PlannerAgent response missing 'actions'. "
+                f"Got keys: {list(parsed.keys())}"
             )
 
         self.logger.log(
@@ -131,21 +191,40 @@ OUTPUT FORMAT — return only valid JSON, no markdown, no explanation:
             intent="plan_generated",
             inputs={"has_rejection_feedback": rejection_feedback is not None},
             outputs={
-                "action_count":    len(parsed["actions"]),
+                "action_count":     len(parsed["actions"]),
                 "confidence_score": parsed.get("confidence_score", 0.0),
+                "model_used":       model_used,
             },
             confidence=parsed.get("confidence_score", 0.0),
         )
+        raw_actions = parsed["actions"]
+        print("RAW ACTIONS VALUE:", repr(parsed["actions"]))
+
+        # Model sometimes returns actions as a JSON string instead of a list
+        if isinstance(raw_actions, str):
+            try:
+                raw_actions = json.loads(raw_actions)
+            except json.JSONDecodeError:
+                # Try stripping leading colon if model prefixed it e.g. ":[{..."
+                stripped = raw_actions.lstrip(": \n")
+                raw_actions = json.loads(stripped)
+
+        if not isinstance(raw_actions, list):
+            raise RuntimeError(
+                f"PlannerAgent 'actions' is {type(raw_actions).__name__} after parsing — "
+                f"expected list. Value: {str(raw_actions)[:200]}"
+            )
 
         return PlanResult(
-            actions=          parsed["actions"],
+            actions=         raw_actions,
             confidence_score= float(parsed.get("confidence_score", 0.7)),
             tokens_used=      tokens_used,
             reasoning=        parsed.get("reasoning", ""),
             metadata=         parsed.get("metadata", {}),
+            model_used=       model_used,
         )
 
-   
+
 
     def _build_reviewer_system_prompt(self) -> str:
         return """
@@ -174,9 +253,7 @@ ACTIONS:
 
 CONSTRAINTS:
 - Do NOT create new actions
-- Do NOT redesign the plan
 - Overrides must reference existing action_id
-- Keep overrides minimal and precise
 
 OUTPUT — return only valid JSON, no markdown:
 {
@@ -184,7 +261,7 @@ OUTPUT — return only valid JSON, no markdown:
   "overrides": [],
   "global_flags": [],
   "confidence": 0.9,
-  "reasoning": "Plan is sound. All missing value columns use appropriate strategies."
+  "reasoning": "Plan is sound."
 }
         """.strip()
 
@@ -203,17 +280,12 @@ OUTPUT — return only valid JSON, no markdown:
             prompt["rejection_feedback"] = rejection_feedback
             prompt["is_replan"]          = True
 
-        response = await asyncio.to_thread(
-            completion,
-            model=self.model,
-            api_key=self.api_key,
-            messages=[
-                {"role": "system", "content": self._build_reviewer_system_prompt()},
-                {"role": "user",   "content": json.dumps(prompt, indent=2)},
-            ],
-            response_format={"type": "json_object"},
-            extra_headers=self.headers,
-        )
+        messages = [
+            {"role": "system", "content": self._build_reviewer_system_prompt()},
+            {"role": "user",   "content": json.dumps(prompt, indent=2)},
+        ]
+
+        response, model_used = await self._call_with_fallback(messages, context="reviewer")
 
         raw_content = response.choices[0].message.content
 
@@ -221,7 +293,8 @@ OUTPUT — return only valid JSON, no markdown:
             review_dict = json.loads(raw_content)
         except json.JSONDecodeError as e:
             raise RuntimeError(
-                f"ReviewerAgent returned non-JSON: {e}\nRaw: {raw_content[:500]}"
+                f"ReviewerAgent ({model_used}) returned non-JSON: {e}\n"
+                f"Raw: {raw_content[:500]}"
             )
 
         review = AgentReview.model_validate(review_dict)
@@ -232,6 +305,7 @@ OUTPUT — return only valid JSON, no markdown:
             inputs={
                 "plan_version": optimized_plan.get("version"),
                 "is_replan":    rejection_feedback is not None,
+                "model_used":   model_used,
             },
             outputs=review.model_dump(),
             confidence=review.confidence,
