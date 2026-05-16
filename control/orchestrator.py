@@ -18,11 +18,12 @@ class JobStatus(BaseModel):
     progress:      float = 0.0          
 
 class SubmitRequest(BaseModel):
-    file_path:     str
+    file_path: str
+    base_dir: str
     target_column: Optional[str] = None
-    job_id:        Optional[str] = None 
+    job_id: Optional[str] = None
     max_iterations: int = 3
-    budget_tokens:  int = 30_000
+    budget_tokens: int = 30_000
 
 
 class Orchestrator:
@@ -90,35 +91,63 @@ class Orchestrator:
     async def _run_job(self, job_id: str, job_context: Dict[str, Any]) -> None:
         async with self._semaphore:
             self._update_status(job_id, status="RUNNING")
+            agent = None  # Initialize to None
+
             try:
                 agent = self._agent_factory(job_context)
 
-                result = await asyncio.wait_for(
+                # Add callback for live state updates
+                def update_state(state_name: str):
+                    self._update_status(job_id, state=state_name)
+
+                agent._update_orchestrator_callback = update_state
+
+                # Run the agent (returns None)
+                await asyncio.wait_for(
                     agent.run(),
                     timeout=self._job_timeout,
                 )
 
+                # Extract final state from agent after completion
+                final_state = agent.state.name if agent else "UNKNOWN"
+
+                # Update status based on final state
                 self._update_status(
                     job_id,
-                    status=result.get("status", "COMPLETED"),
-                    state=result.get("state"),
-                    state_uuid=result.get("state_uuid"),
-                    actions_applied=result.get("actions_applied"),
-                    rows_processed=result.get("rows_processed"),
+                    status="COMPLETED" if final_state == "COMPLETED" else "FAILED",
+                    state=final_state,
+                    state_uuid=getattr(agent, 'state_uuid', None),
+                    actions_applied=len(agent.optimized_plan.actions) if (agent and agent.optimized_plan) else 0,
+                    rows_processed=agent.execution_result.get("rows_processed") if (agent and agent.execution_result) else None,
                     progress=1.0,
                 )
 
             except asyncio.TimeoutError:
+                # Get current state if available
+                current_state = agent.state.name if agent else "UNKNOWN"
                 self._update_status(
                     job_id,
                     status="FAILED",
+                    state=current_state,
                     error=f"Job timed out after {self._job_timeout}s",
                 )
             except asyncio.CancelledError:
-                self._update_status(job_id, status="CANCELLED")
+                current_state = agent.state.name if agent else "CANCELLED"
+                self._update_status(
+                    job_id, 
+                    status="CANCELLED",
+                    state=current_state
+                )
                 raise
             except Exception as exc:
-                self._update_status(job_id, status="FAILED", error=str(exc))
+    
+                current_state = agent.state.name if agent else "UNKNOWN"
+                self._update_status(
+                    job_id, 
+                    status="FAILED",
+                    state=current_state,
+                    error=str(exc)
+                )
 
     def _on_task_done(self, job_id: str, task: asyncio.Task) -> None:
         """Callback to catch any exception that slipped through _run_job."""

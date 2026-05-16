@@ -2,6 +2,13 @@ import pandas as pd
 from typing import Dict, Any
 from copy import deepcopy
 
+import asyncio
+from typing import Any, Dict, Optional
+ 
+from app.config import HITL_POLL_INTERVAL, HITL_TIMEOUT_SECONDS
+from core.hitl import HitlStore
+
+
 class HITLEscalationError(Exception):
     pass
 
@@ -74,7 +81,81 @@ class RiskEngine:
         )
         return result
 
+class HITLGate:
+    def __init__(
+        self,
+        hitl_store: HitlStore,
+        poll_interval: float = HITL_POLL_INTERVAL,
+        timeout: int = HITL_TIMEOUT_SECONDS,
+    ) -> None:
+        self.store         = hitl_store
+        self.poll_interval = poll_interval
+        self.timeout       = timeout
+ 
+    async def request_approval(
+        self,
+        plan: Dict[str, Any],
+        risk_result: Dict[str, Any],
+        state_uuid: str,
+        diff_data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Pause the pipeline and wait for a human decision.
+ 
+        Returns:
+            {"action": "APPROVE"}
+            {"action": "REJECT", "reason": "<optional text>"}
+ 
+        Raises:
+            asyncio.TimeoutError  — if no decision arrives within self.timeout
+            RuntimeError          — if the store row disappears unexpectedly
+        """
+        job_id = state_uuid  # 1-to-1 mapping; state_uuid IS the job key
+ 
+        # ── Write the request so Streamlit can find it ─────────────────────
+        await asyncio.to_thread(
+            self.store.write_request,
+            job_id=job_id,
+            state_uuid=state_uuid,
+            plan_dict=plan,
+            risk_result=risk_result,
+            diff_data=diff_data,
+        )
+ 
+        # ── Poll until resolved or timed out ───────────────────────────────
+        elapsed = 0.0
+        while elapsed < self.timeout:
+            await asyncio.sleep(self.poll_interval)
+            elapsed += self.poll_interval
+ 
+            row = await asyncio.to_thread(self.store.read_request, job_id)
+ 
+            if row is None:
+                raise RuntimeError(
+                    f"HITLGate: store row for job {job_id!r} disappeared mid-poll. "
+                    "Check HitlStore for concurrent deletion."
+                )
+ 
+            status = row.get("status", "PENDING")
+ 
+            if status == "APPROVED":
+                await asyncio.to_thread(self.store.clear, job_id)
+                return {"action": "APPROVE"}
+ 
+            if status == "REJECTED":
+                reason = row.get("decision_reason")
+                await asyncio.to_thread(self.store.clear, job_id)
+                return {"action": "REJECT", "reason": reason}
+ 
+            # Still PENDING — keep waiting
 
+        # ── Timeout path ───────────────────────────────────────────────────
+        await asyncio.to_thread(self.store.clear, job_id)
+        raise asyncio.TimeoutError(
+            f"HITLGate: no human decision received within {self.timeout}s "
+            f"for job {job_id!r}"
+        )
+    
 class HITL:
     """
     Human approval system for risky operations.

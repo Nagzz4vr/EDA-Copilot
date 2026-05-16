@@ -1,8 +1,9 @@
+from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Optional
-from __future__ import annotations
+
 from pydantic import BaseModel
 
 
@@ -40,7 +41,9 @@ class TokenUsage:
 @dataclass
 class _JobBudget:
     config:BudgetConfig    
-    tokens_used: Dict[str, TokenUsage]
+    tokens_used: Dict[str, TokenUsage] = field(
+        default_factory=dict
+    )
     cost_usd:float = 0.0
     job_start_time:float = field(default_factory=time.monotonic)
     lock:asyncio.Lock = field(default_factory=asyncio.Lock)

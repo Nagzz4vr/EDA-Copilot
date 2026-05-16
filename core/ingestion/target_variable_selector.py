@@ -17,17 +17,31 @@ class TargetVariableSelector:
         self._validate_exists()
     
     def _validate_safe_path(self, user_path: str) -> Path:
+        """Validate user_path is within base_dir"""
         if not user_path or not user_path.strip():
             raise ValueError("Path cannot be empty or whitespace")
         
-        target = (self.base_dir / user_path).resolve()
-        
+        user_path_obj = Path(user_path)
+
+        if user_path_obj.is_absolute():
+            target = user_path_obj.resolve()
+        else:
+            target = (self.base_dir / user_path_obj).resolve()
+    
         if target == self.base_dir:
-            raise ValueError(f"Path resolves to base directory itself: {target}")
-        
-        if self.base_dir not in target.parents:
-            raise SecurityError(f"Path traversal detected for '{user_path}'")
-        
+            raise ValueError(
+                f"Path resolves to base directory itself: {target}"
+            )
+    
+        try:
+            target.relative_to(self.base_dir)
+    
+        except ValueError:
+            raise SecurityError(
+                f"Path traversal detected: '{user_path}' resolves to '{target}', "
+                f"which is outside base directory '{self.base_dir}'"
+            )
+    
         return target
     
     def _validate_exists(self):

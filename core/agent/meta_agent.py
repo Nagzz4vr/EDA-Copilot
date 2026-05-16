@@ -98,7 +98,8 @@ class MetaAgent:
     async def run(self):
         try:
             while self.state not in [State.COMPLETED, State.FAILED]:
-
+                if hasattr(self, '_update_orchestrator_callback'):
+                    self._update_orchestrator_callback(self.state.name)
                 if self.state == State.PERCEIVING:
                     self._transition(State.PERCEIVING, trigger="AGENT_START")
                     self.state = await self._perceive()
@@ -324,23 +325,46 @@ class MetaAgent:
 
             if self.budget_controller:
                 await asyncio.to_thread(
-                    self.budget_controller.assert_budget_available,
-                    phase="PLANNING"
-                )
+    self.budget_controller.assert_budget_available,
+    self.context["job_id"],
+    "PLANNING",
+)
 
             plan_result = await self.agent.generate_plan(
                 signal_graph=self.signal_graph,
                 canonical_context=self.canonical_output,
             )
 
-
             if self.token_ledger:
+                if isinstance(plan_result.tokens_used, dict):
+                    prompt_tokens = plan_result.tokens_used.get("input_tokens", 0)
+                    completion_tokens = plan_result.tokens_used.get("output_tokens", 0)
+                elif isinstance(plan_result.tokens_used, int):
+                    # If it's just a total count
+                    prompt_tokens = 0
+                    completion_tokens = plan_result.tokens_used
+                else:
+                    prompt_tokens = 0
+                    completion_tokens = 0
+
+                # Get additional metadata if available
+                latency_ms = getattr(plan_result, "latency_ms", 0)
+                cache_hit = getattr(plan_result, "cache_hit", False)
+                retry_count = getattr(plan_result, "retry_count", 0)
+                tool_calls = len(getattr(plan_result, "tool_calls", []))
+
                 await asyncio.to_thread(
                     self.token_ledger.record,
-                    phase="PLANNING",
-                    tokens_used=plan_result.tokens_used,
+                    user_id=self.context.get("user_id", "unknown"),
+                    agent_id="meta_agent",
+                    model=getattr(plan_result, "model", "unknown"),
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    latency_ms=latency_ms,
+                    cache_hit=cache_hit,
+                    retry_count=retry_count,
+                    tool_calls=tool_calls,
                 )
-
             normalized_actions = []
 
             for i, action in enumerate(plan_result.actions):

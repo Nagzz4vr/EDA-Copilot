@@ -102,40 +102,83 @@ class PlannerAgent:
         return """
 You are a Data Transformation Planner for ML pipelines.
 
-INPUT you will receive:
-- signal_graph:       nodes describing data quality issues detected
-- canonical_context:  dataset statistics, column types, target column
-- rejection_feedback: (optional) why the previous plan was rejected
+INPUT:
+- signal_graph: nodes describing data quality issues detected
+- canonical_context: dataset statistics, column types, target column
+- rejection_feedback: (optional) why previous plan was rejected
 
 YOUR TASK:
-Produce a transformation plan that resolves the signals.
+Generate a valid transformation plan that strictly follows the schema.
 
-RULES:
-- Only use these action_types:
-    impute_mean, impute_median, impute_mode, impute_constant,
-    drop_column, drop_rows, one_hot_encode, ordinal_encode,
-    label_encode, scale_standard, scale_minmax, scale_robust,
-    log_transform, clip_outliers, remove_outliers,
-    type_cast, rename_column, fill_forward, fill_backward
-- Every action must have a unique action_id (e.g. "act_001")
-- Never touch the target column unless imputing it
-- If rejection_feedback is present, directly address the concerns raised
+------------------------------------------------------------
+HARD RULES (STRICT - NON NEGOTIABLE)
+------------------------------------------------------------
 
-OUTPUT FORMAT — return only valid JSON, no markdown, no explanation:
+1. You MUST return ONLY valid JSON.
+   - No markdown
+   - No explanations
+   - No extra keys outside schema
+
+2. Allowed action_types ONLY:
+   impute_mean, impute_median, impute_mode, impute_constant,
+   drop_column, drop_rows, one_hot_encode, ordinal_encode,
+   label_encode, scale_standard, scale_minmax, scale_robust,
+   log_transform, clip_outliers, remove_outliers,
+   type_cast, rename_column, fill_forward, fill_backward
+
+3. Every action MUST include:
+   - action_id (string, unique, e.g. "act_001")
+   - action_type (from allowed list ONLY)
+   - column (string)
+   - parameters (object, can be empty {})
+   - rationale (string, required)
+
+4. NEVER:
+   - modify target column unless explicitly required for imputation
+   - invent new action types
+   - omit any required field
+
+------------------------------------------------------------
+OUTPUT SCHEMA (STRICT)
+------------------------------------------------------------
+Return exactly this structure:
+
 {
   "actions": [
     {
-      "action_id":   "act_001",
+      "action_id": "act_001",
       "action_type": "impute_median",
-      "column":      "age",
-      "parameters":  {},
-      "rationale":   "35% missing values, numeric column"
+      "column": "age",
+      "parameters": {},
+      "rationale": "Explain why this transformation is needed"
     }
   ],
   "confidence_score": 0.85,
-  "reasoning": "Brief explanation of the overall strategy"
+  "reasoning": "Brief overall strategy explanation"
 }
-        """.strip()
+
+------------------------------------------------------------
+QUALITY RULES
+------------------------------------------------------------
+
+- Keep actions minimal and necessary (no over-engineering)
+- Prefer safe transformations over destructive ones
+- Ensure column names exactly match input schema
+- If unsure, prefer no action rather than invalid action
+
+------------------------------------------------------------
+REJECTION FEEDBACK HANDLING (IMPORTANT)
+
+If rejection_feedback is provided:
+- You MUST explicitly correct all mentioned issues
+- Do NOT repeat previously rejected logic
+- Adjust plan accordingly, do not ignore feedback
+
+------------------------------------------------------------
+FINAL CONSTRAINT
+
+Output MUST be parseable by json.loads() with no preprocessing.
+""".strip()
 
     async def generate_plan(
         self,

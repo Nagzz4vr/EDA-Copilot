@@ -38,17 +38,27 @@ class Ingestor:
         if not user_path or not user_path.strip():
             raise ValueError("Path cannot be empty or whitespace")
         
-        target = (self.base_dir / user_path).resolve()
-        
+        user_path_obj = Path(user_path)
+
+        if user_path_obj.is_absolute():
+            target = user_path_obj.resolve()
+        else:
+            target = (self.base_dir / user_path_obj).resolve()
+    
         if target == self.base_dir:
-            raise ValueError(f"Path resolves to base directory itself: {target}")
-        
-        if self.base_dir not in target.parents:
+            raise ValueError(
+                f"Path resolves to base directory itself: {target}"
+            )
+    
+        try:
+            target.relative_to(self.base_dir)
+    
+        except ValueError:
             raise SecurityError(
                 f"Path traversal detected: '{user_path}' resolves to '{target}', "
                 f"which is outside base directory '{self.base_dir}'"
             )
-        
+    
         return target
     
     def _validate_exists(self):
@@ -77,13 +87,13 @@ class Ingestor:
         
         effective_batch = batch_size or 10_000
         
-        # Route to appropriate streaming method
+
         if self.filepath.suffix == ".csv":
             gen = self._stream_csv(effective_batch)
         elif self.filepath.suffix == ".parquet":
             gen = self._stream_parquet(effective_batch)
         elif self.filepath.suffix == ".json":
-            # Check file size for JSON
+
             file_size = self.filepath.stat().st_size
             max_size = 500 * 1024 * 1024  # 500MB
             if file_size >= max_size:
@@ -199,3 +209,27 @@ class Ingestor:
                 return
             yield batch
             count += len(batch)
+
+    def head(self, n: int = 50) -> pd.DataFrame:
+
+        batches = []
+        collected = 0
+
+        for batch in self.load_data(limit=n):
+
+            remaining = n - collected
+
+            if len(batch) > remaining:
+                batch = batch.head(remaining)
+
+            batches.append(batch)
+
+            collected += len(batch)
+
+            if collected >= n:
+                break
+
+        if not batches:
+            return pd.DataFrame()
+
+        return pd.concat(batches, ignore_index=True)
