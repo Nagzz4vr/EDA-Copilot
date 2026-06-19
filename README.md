@@ -1,8 +1,22 @@
 # EDA Copilot — Autonomous Agentic Data Preparation System
 
-An intelligent, multi-stage ML data preparation platform that autonomously profiles datasets, detects data quality issues, generates optimized preprocessing pipelines, validates transformation safety, and executes reproducible Directed Acyclic Graph (DAG) workflows. It features native execution observability, Human-in-the-Loop (HITL) governance, and budget-aware LLM orchestration.
+Preparing data is often the most time-consuming and error-prone stage of a machine learning workflow. Data scientists and ML engineers must identify quality issues, choose preprocessing strategies, validate transformations, and ensure that changes do not introduce leakage or degrade model performance.
 
-Designed for production-grade preprocessing automation, **EDA Copilot** bridges the gap between rule-based statistical signal detection and LLM reasoning, incorporating graph optimization, safe state simulation, data validation, and rollback-safe execution into a unified orchestration framework.
+EDA Copilot is an agentic data preparation system that automates this workflow. Given a raw dataset, it profiles data quality, detects risks and anomalies, plans preprocessing actions, validates proposed transformations, and executes them through a reproducible DAG-based pipeline.
+
+I built EDA Copilot to explore how deterministic data validation, statistical signal detection, and LLM-based reasoning can work together in a production-oriented preprocessing system. Rather than relying solely on AI-generated recommendations, the platform combines rule-based analysis, simulation, risk assessment, and Human-in-the-Loop (HITL) governance to ensure transformations remain explainable and safe.
+
+Key capabilities include:
+
+Automated detection of data quality issues and statistical risks
+LLM-assisted preprocessing and feature engineering planning
+Transformation simulation before execution
+Leakage detection and validation safeguards
+Human approval workflows for high-risk operations
+Checkpointed DAG execution with rollback support
+Exportable datasets, preprocessing pipelines, and audit reports
+
+The system demonstrates how agentic workflows can be applied beyond chat interfaces to automate complex data engineering and machine learning preparation tasks while maintaining transparency, reproducibility, and operational safety.
 
 ---
 
